@@ -1,0 +1,35 @@
+{
+    "C_Cpp.default.configurationProvider": "",
+    "C_Cpp.default.systemIncludePath": [
+        "/usr/share/cc65/include",
+    ],
+    "C_Cpp.default.defines": [
+        "__cdecl__=",
+        "__fastcall__=",
+        "asm(...)=",
+    ],
+    "[ca65]": {
+        "editor.tabSize": 8
+    },
+    "cmake.showSystemKits": false,
+    "cmake.preferredGenerators": [
+        "Unix Makefiles"
+    ],
+    "cmake.statusbar.advanced": {
+        "debug": {
+            "visibility": "hidden"
+        },
+        "launch": {
+            "visibility": "hidden"
+        },
+        "launchTarget": {
+            "visibility": "default"
+        },
+        "build": {
+            "visibility": "hidden"
+        },
+        "buildTarget": {
+            "visibility": "default"
+        },
+    },
+}

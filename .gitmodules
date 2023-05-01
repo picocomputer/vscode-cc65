@@ -1,0 +1,3 @@
+[submodule "rp6502-sdk"]
+	path = rp6502-sdk
+	url = https://github.com/picocomputer/rp6502-sdk.git
