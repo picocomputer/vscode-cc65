@@ -5,7 +5,7 @@
     "tasks": [
         {
             "label": "RP6502: run program",
-            "command": "python3 run.py ${command:cmake.launchTargetPath}",
+            "command": "python3 rp6502.py -a 0x200 run ${command:cmake.launchTargetPath}",
             "type": "shell",
             "group": {
                 "kind": "build"
