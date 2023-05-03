@@ -1,5 +1,6 @@
 {
     "C_Cpp.default.configurationProvider": "",
+    "C_Cpp.default.cStandard": "c99",
     "C_Cpp.default.systemIncludePath": [
         "/usr/share/cc65/include",
     ],

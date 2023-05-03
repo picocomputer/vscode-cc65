@@ -9,21 +9,24 @@ $ pip install pyserial
 ```
 
 Download and unpack the latest [zip from GitHub](https://github.com/picocomputer/rp6502-vscode/archive/refs/heads/main.zip
-). Retrieve the latest RP6502 SDK using git.
+). Then retrieve the latest RP6502 SDK as a submodule using git.
 ```
-$ cd to_unzipped_folder
+$ cd to_your_new_project
 $ git init
-$ git submodule update --init
+$ rmdir rp6502-sdk
+$ git submodule add https://github.com/picocomputer/rp6502-sdk.git
 ```
 
 Now launch VSCode and "Open Folder..." your new project.
 
 Install the extensions VSCode will recommend.
 
-When asked for a CMake "kit" choose "RP6502".
+When asked to configure project "your_new_project", choose "Yes".
 
-When asked to configure IntelliSense, choose "Don't Allow". When asked again, choose "No". This has already been configured with hacks since CC65 isn't supported by IntelliSense.
+When asked for a CMake kit, choose "RP6502".
 
-You can build with F7. Uploading and running a program is done with "Run Build Task..." CTRL-SHIFT-B.
+When asked to configure IntelliSense, choose "Don't Allow". If asked again, choose "No". This has already been configured with hacks since CC65 isn't fully supported by CMake or IntelliSense.
+
+You can build with F7. Running a program is done with "Run Build Task..." CTRL-SHIFT-B.
 
 You're all set to create the next big thing. Edit CMakeLists.txt to add new C and ASM source files.
