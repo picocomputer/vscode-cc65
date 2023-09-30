@@ -12,7 +12,7 @@ $ pip install pyserial
 ```
 
 Go to the [GitHub template](https://github.com/picocomputer/rp6502-vscode) and
-select "Use this template" then "Create a new repositoy". GitHub will make a
+select "Use this template" then "Create a new repository". GitHub will make a
 clean project for you to start with. After you clone your new project, don't
 forget to grab the SDK as a submodule.
 
@@ -30,7 +30,7 @@ answer isn't going to change the hacks in settings.json that make CC65 work.
 
 You can build with F7. Running a program is done with "Run Build Task..."
 CTRL-SHIFT-B. Edit CMakeLists.txt to add new C and ASM source files. It's
-pretty normal C/ASM develpment from here on.
+pretty normal C/ASM development from here on.
 
 If you're new to VSCode or C development, here's some of the things VSCode
 will ask. In general, clicking through the default or obvious choice is what
