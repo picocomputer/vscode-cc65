@@ -5,6 +5,7 @@ project(MY-RP6502-PROJECT C ASM)
 add_subdirectory(rp6502-sdk)
 
 add_executable(hello)
+rp6502_executable(hello)
 target_sources(hello PRIVATE
     src/hello.c
 )
