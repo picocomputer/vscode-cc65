@@ -1,7 +1,7 @@
 # RP6502 VSCode Scaffolding
 
 This is scaffolding for your new Picocomputer software project. These
-instructions are for Linux distributions that uses apt. A Windows install is
+instructions are for Linux distributions that use apt. A Windows install is
 demonstrated in a [video by Lee Smith](https://www.youtube.com/watch?v=zJpz16XDL9c&t=1535s).
 MacOS requires translating the apt-get to a package manager like brew or port.
 
@@ -29,7 +29,11 @@ several times, choose "Don't allow", "No", "Don't ask again" or whatever
 answer isn't going to change the hacks in settings.json that make CC65 work.
 
 You can build with F7. Running a program is done with "Run Build Task..."
-CTRL-SHIFT-B. Edit CMakeLists.txt to add new C and ASM source files. It's
+CTRL-SHIFT-B. If the default communications device doesn't work, edit ".rp6502"
+in the project root folder. This file will be created the first time you
+"Run Build Task..." and will be ignored by git.
+
+Edit CMakeLists.txt to add new source and asset files. It's
 pretty normal C/ASM development from here on.
 
 If you're new to VSCode or C development, here's some of the things VSCode
