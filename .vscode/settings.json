@@ -2,6 +2,7 @@
     "C_Cpp.default.configurationProvider": "",
     "C_Cpp.default.cStandard": "c99",
     "C_Cpp.default.systemIncludePath": [
+        "/share/cc65/include",
         "/usr/share/cc65/include",
     ],
     "C_Cpp.default.defines": [
@@ -9,19 +10,8 @@
         "__fastcall__=",
         "asm(...)=",
     ],
-    "[ca65]": {
-        "editor.tabSize": 8
-    },
     "cmake.showSystemKits": false,
     "cmake.preferredGenerators": [
         "Unix Makefiles"
     ],
-    "cmake.statusbar.advanced": {
-        "debug": {
-            "visibility": "hidden"
-        },
-        "launch": {
-            "visibility": "hidden"
-        },
-    },
 }

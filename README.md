@@ -3,11 +3,15 @@
 This is scaffolding for your new Picocomputer software project. These
 instructions are for Linux distributions that use apt. A Windows install is
 demonstrated in a [video by Lee Smith](https://www.youtube.com/watch?v=zJpz16XDL9c&t=1535s).
-MacOS requires translating the apt-get to a package manager like brew or port.
+MacOS requires translating the apt-get below to a package manager like brew or port.
 
-You'll need [VSCode](https://code.visualstudio.com/) and the following suite of tools.
+
+You must have on your development system:
+ * [VSCode](https://code.visualstudio.com/). This has its own installer.
+ * A source install of [CC65](https://github.com/picocomputer/cc65).
+ * The following suite of tools for your specific OS.
 ```
-$ sudo apt-get install cc65 cmake python3 pip git build-essential
+$ sudo apt-get install cmake python3 pip git build-essential
 $ pip install pyserial
 ```
 
