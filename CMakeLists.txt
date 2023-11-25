@@ -7,5 +7,5 @@ add_subdirectory(tools)
 add_executable(hello)
 rp6502_executable(hello)
 target_sources(hello PRIVATE
-    src/hello.c
+    src/main.c
 )

@@ -1,8 +1,3 @@
-# Copyright (c) 2023 Rumbledethumps
-#
-# SPDX-License-Identifier: BSD-3-Clause
-# SPDX-License-Identifier: Unlicense
-
 # CMake Toolchain file for the RP6502 SDK.
 
 set(CMAKE_SYSTEM_NAME Generic)

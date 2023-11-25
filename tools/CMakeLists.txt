@@ -1,9 +1,4 @@
-#
-# Copyright (c) 2023 Rumbledethumps
-#
-# SPDX-License-Identifier: BSD-3-Clause
-# SPDX-License-Identifier: Unlicense
-#
+# Add cmake commands: rp6502_executable() and rp6502_asset()
 
 # Package a CC65 executable target as an RP6502 ROM.
 #
