@@ -23,7 +23,7 @@
                 "focus": true
             },
             "options": {
-                "cwd": "${workspaceFolder}/rp6502-sdk"
+                "cwd": "${workspaceFolder}/tools"
             },
             "problemMatcher": []
         },
