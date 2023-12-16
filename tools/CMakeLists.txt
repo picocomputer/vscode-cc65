@@ -7,7 +7,7 @@
 #
 #  rp6502_executable(<name> START [addr] RESET [addr] roms...)
 #
-# Packages an executable target called ``<name>`` in RP6502 ROM format.
+# Packages executable target ``<name>`` into RP6502 ROM format.
 # ``START <addr>`` defaults to 0x200.
 # ``RESET <addr>`` defaults to 0x200.
 #
@@ -58,7 +58,7 @@ endfunction()
 #
 #  rp6502_asset(<name> addr in_file {out_file})
 #
-# Packages an executable target called ``<name>`` in RP6502 ROM format.
+# Packages the ``<in_file>`` into RP6502 ROM format.
 # ``out_file`` defaults to in_file plus ``.rp6502``
 #
 function(rp6502_asset name addr in_file)
