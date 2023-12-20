@@ -1,20 +1,28 @@
 # RP6502 VSCode Scaffolding
 
-This is scaffolding for your new Picocomputer software project. These
-instructions are for Linux distributions that use apt. A Windows install is
-demonstrated in a [video by Lee Smith](https://www.youtube.com/watch?v=zJpz16XDL9c&t=1535s).
-MacOS requires translating the apt-get below to a package manager like brew or port.
+This is scaffolding for a new Picocomputer 6502 software project.
 
-
-You must have on your development system:
+### Linux Tools Install:
  * [VSCode](https://code.visualstudio.com/). This has its own installer.
- * A source install of [this CC65](https://github.com/picocomputer/cc65).
- * The following suite of tools for your specific OS.
-```
-$ sudo apt-get install cmake python3 pip git build-essential
-$ pip install pyserial
-```
+ * A source install of [CC65](https://cc65.github.io/getting-started.html).
+ * The following tools installed from your package managers:
+    * `sudo apt-get install cmake python3 pip git build-essential`
+    * `pip install pyserial`
 
+### Windows Tools Install:
+ * [VSCode](https://code.visualstudio.com/). This has its own installer.
+ * A source install of [CC65](https://cc65.github.io/getting-started.html).
+   Do not skip the step about adding bin to your path.
+ * Install python by typing `python3` which will launch the Microsoft Store
+   where you start the install. If python runs, this has already been done,
+   exit python with Ctrl-Z plus Return.
+ * Install the python serial library with `pip install pyserial`.
+ * `winget install -e --id Kitware.CMake`.
+ * `winget install -e --id GnuWin32.Make`.
+    Add "C:\Program Files (x86)\GnuWin32\bin" to your path.
+ * `winget install -e --id Git.Git`.
+
+### Getting Started:
 Go to the [GitHub template](https://github.com/picocomputer/rp6502-vscode) and
 select "Use this template" then "Create a new repository". GitHub will make a
 clean project for you to start with. Then you can download the repository
