@@ -1,4 +1,4 @@
-# RP6502 VSCode Scaffolding
+# RP6502 VSCode Scaffolding for CC65
 
 This is scaffolding for a new Picocomputer 6502 software project.
 
@@ -23,7 +23,7 @@ This is scaffolding for a new Picocomputer 6502 software project.
  * `winget install -e --id Git.Git`.
 
 ### Getting Started:
-Go to the [GitHub template](https://github.com/picocomputer/rp6502-vscode) and
+Go to the [GitHub template](https://github.com/picocomputer/vscode-cc65) and
 select "Use this template" then "Create a new repository". GitHub will make a
 clean project for you to start with. Then you can download the repository
 and open the files.
