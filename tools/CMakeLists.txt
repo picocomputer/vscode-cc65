@@ -55,8 +55,17 @@ function(rp6502_executable name)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(tool_command "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/rp6502.py"
-        -a "${start_addr}" -r "${reset_addr}"
     )
+    if (NOT start_addr STREQUAL "none")
+        list(APPEND tool_command
+            -a "${start_addr}"
+        )
+    endif ()
+    if (NOT reset_addr STREQUAL "none")
+        list(APPEND tool_command
+            -r "${reset_addr}"
+        )
+    endif ()
     if (NOT irq_addr STREQUAL "none")
         list(APPEND tool_command
             -i "${irq_addr}"
@@ -112,4 +121,5 @@ function(rp6502_asset name addr in_file)
             -o "${CMAKE_CURRENT_BINARY_DIR}/${out_file}"
             create "${CMAKE_CURRENT_SOURCE_DIR}/${in_file}"
     )
+    add_dependencies(${name} ${custom_target_name})
 endfunction()
