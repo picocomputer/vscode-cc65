@@ -13,6 +13,7 @@
     ],
     "cmake.showSystemKits": false,
     "cmake.preferredGenerators": [
-        "Unix Makefiles"
+        "Ninja",
+        "Unix Makefiles",
     ],
 }
