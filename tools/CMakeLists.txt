@@ -82,8 +82,9 @@ function(rp6502_executable name)
         -- ${extra_roms}
     )
     add_custom_command(TARGET ${name} POST_BUILD
-        COMMAND ${tool_command}
-        DEPENDS ${name})
+        COMMAND ${tool_command})
+    set_property( TARGET ${name} APPEND PROPERTY
+        LINK_DEPENDS ${extra_roms})
 endfunction()
 
 # Package anything as an RP6502 ROM.
