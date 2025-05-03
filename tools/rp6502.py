@@ -34,12 +34,7 @@ class Monitor:
     def send_break(self, duration=0.01, retries=1):
         """Stop the 6502 and return to monitor."""
         self.serial.read_all()
-        if platform.system() == "Darwin":
-            self.serial.baudrate = 1200
-            self.serial.write(b"\0")
-            self.serial.baudrate = self.UART_BAUDRATE
-        else:
-            self.serial.send_break(duration)
+        self.serial.send_break(duration)
         try:
             self.wait_for_prompt("]")
             return
@@ -115,7 +110,7 @@ class ROM:
 
     def __init__(self):
         """ROMs begin with up to a screen of help text"""
-        """ followed by a sparse array of virtual ROM. """
+        """followed by a sparse array of virtual ROM."""
         self.help = []
         self.data = [0 for i in range(0x20000)]
         self.alloc = [0 for i in range(0x20000)]
@@ -136,14 +131,6 @@ class ROM:
         for i in range(length):
             self.data[addr + i] = data[offset + i]
 
-    def add_irq_vector(self, addr: int):
-        """Set IRQ vector in $FFFE and $FFFF."""
-        if addr < 0 or addr > 0xFFFF:
-            raise RuntimeError(f"Invalid IRQ vector: ${addr:04X}")
-        self.allocate_rom(0xFFFE, 2)
-        self.data[0xFFFE] = addr & 0xFF
-        self.data[0xFFFF] = addr >> 8
-
     def add_nmi_vector(self, addr: int):
         """Set NMI vector in $FFFA and $FFFB."""
         if addr < 0 or addr > 0xFFFF:
@@ -160,18 +147,54 @@ class ROM:
         self.data[0xFFFC] = addr & 0xFF
         self.data[0xFFFD] = addr >> 8
 
-    def add_binary_file(self, file, addr: Union[int, None] = None):
-        """Add binary memory data from file. addr=None uses"""
-        """first two bytes as address and second two bytes as reset."""
+    def add_irq_vector(self, addr: int):
+        """Set IRQ vector in $FFFE and $FFFF."""
+        if addr < 0 or addr > 0xFFFF:
+            raise RuntimeError(f"Invalid IRQ vector: ${addr:04X}")
+        self.allocate_rom(0xFFFE, 2)
+        self.data[0xFFFE] = addr & 0xFF
+        self.data[0xFFFF] = addr >> 8
+
+    def add_binary_file(
+        self,
+        file,
+        **addr,
+    ):
+        """Add binary memory data from file. The addr kwargs are: data, nmi, reset, and irq."""
+        """Data is where to load the data, the rest are CPU vectors for $FFFA-$FFFF."""
+        """Addresses should be an int, None to not provide, or True to read from the file."""
+        """Vectors are read from the file in the order listed above."""
         with open(file, "rb") as f:
             data = f.read()
-        if addr == None:
-            if len(data) < 4:
-                raise RuntimeError("No addresses found.")
-            addr = data[0] + data[1] * 256
-            self.add_reset_vector(data[2] + data[3] * 256)
-            data = data[4:]
-        self.add_binary_data(data, addr)
+        if addr["data"] == None:
+            raise RuntimeError("Address for data is required.")
+        if addr["data"] == True:
+            if len(data) < 2:
+                raise RuntimeError("No data address found in file.")
+            addr["data"] = data[0] + data[1] * 256
+            data = data[2:]
+        if addr["nmi"] == True:
+            if len(data) < 2:
+                raise RuntimeError("No nmi address found in file.")
+            addr["nmi"] = data[0] + data[1] * 256
+            data = data[2:]
+        if addr["nmi"]:
+            self.add_nmi_vector(addr["nmi"])
+        if addr["reset"] == True:
+            if len(data) < 2:
+                raise RuntimeError("No reset address found in file.")
+            addr["reset"] = data[0] + data[1] * 256
+            data = data[2:]
+        if addr["reset"]:
+            self.add_reset_vector(addr["reset"])
+        if addr["irq"] == True:
+            if len(data) < 2:
+                raise RuntimeError("No irq address found in file.")
+            addr["irq"] = data[0] + data[1] * 256
+            data = data[2:]
+        if addr["irq"]:
+            self.add_irq_vector(addr["irq"])
+        self.add_binary_data(data, addr["data"])
 
     def add_rp6502_file(self, file):
         """Add RP6502 ROM data from file."""
@@ -225,7 +248,7 @@ class ROM:
             or length < 0
         ):
             raise IndexError(
-                f"RP6502 invalid address ${addr+i:04X} or length ${length+i:03X}"
+                f"RP6502 invalid address ${addr:04X} or length ${length:03X}"
             )
         for i in range(length):
             if self.alloc[addr + i]:
@@ -267,12 +290,40 @@ def exec_args():
     parser.add_argument(
         "command",
         choices=["run", "upload", "create"],
-        help="Run local RP6502 ROM file by sending to RP6502 RAM. "
-        "Upload any local files to RP6502 USB MSC drive. "
-        "Create RP6502 ROM file from a local binary file and additional local ROM files. ",
+        help="{Run} local RP6502 ROM file by sending to RP6502 RAM. "
+        "{Upload} any local files to RP6502 USB MSC drive. "
+        "{Create} RP6502 ROM file from a local binary file and additional local ROM files. ",
     )
     parser.add_argument("filename", nargs="*", help="Local filename(s).")
     parser.add_argument("-o", dest="out", metavar="name", help="Output path/filename.")
+    parser.add_argument(
+        "-a",
+        "--address",
+        dest="address",
+        metavar="addr",
+        help="Starting address of data or `file` to read from file.",
+    )
+    parser.add_argument(
+        "-n",
+        "--nmi",
+        dest="nmi",
+        metavar="addr",
+        help="NMI vector for $FFFA-$FFFB or `file` to read from file.",
+    )
+    parser.add_argument(
+        "-r",
+        "--reset",
+        dest="reset",
+        metavar="addr",
+        help="Reset vector for $FFFC-$FFFD or `file` to read from file.",
+    )
+    parser.add_argument(
+        "-i",
+        "--irq",
+        dest="irq",
+        metavar="addr",
+        help="IRQ vector for $FFFE-$FFFF or `file` to read from file.",
+    )
     parser.add_argument(
         "-c",
         "--config",
@@ -287,20 +338,6 @@ def exec_args():
         metavar="dev",
         default=default_device,
         help=f"Serial device name. Default={default_device}",
-    )
-    parser.add_argument(
-        "-a",
-        "--address",
-        dest="address",
-        metavar="addr",
-        help="Starting address of file. If not provided, "
-        "the first two bytes of the file are the start address and "
-        "the second two bytes of the file are the reset vector.",
-    )
-    parser.add_argument("-i", "--irq", dest="irq", metavar="addr", help="IRQ vector.")
-    parser.add_argument("-n", "--nmi", dest="nmi", metavar="addr", help="NMI vector.")
-    parser.add_argument(
-        "-r", "--reset", dest="reset", metavar="addr", help="Reset vector."
     )
     args = parser.parse_args()
 
@@ -322,13 +359,15 @@ def exec_args():
             str = re.sub("^\\$", "0x", str)
             if re.match("^(0x|)[0-9A-Fa-f]*$", str):
                 return eval(str)
+            elif str.lower() == "file":
+                return True
             else:
                 parser.error(f"argument {errmsg}: invalid address: '{str}'")
 
     args.address = str_to_address(parser, args.address, "-a/--address")
-    args.irq = str_to_address(parser, args.irq, "-i/--irq")
     args.nmi = str_to_address(parser, args.nmi, "-n/--nmi")
     args.reset = str_to_address(parser, args.reset, "-r/--reset")
+    args.irq = str_to_address(parser, args.irq, "-i/--irq")
 
     # python3 tools/rp6502.py run
     if args.command == "run":
@@ -363,18 +402,22 @@ def exec_args():
 
     # python3 tools/rp6502.py create
     if args.command == "create":
+        if args.out == None:
+            parser.error(f"argument -o required")
+        if args.address == None:
+            parser.error(f"argument -a/--address required")
         print(f"[{os.path.basename(__file__)}] Creating {args.out}")
         rom = ROM()
-        if args.irq != None:
-            rom.add_irq_vector(args.irq)
-        if args.nmi != None:
-            rom.add_nmi_vector(args.nmi)
-        if args.reset != None:
-            rom.add_reset_vector(args.reset)
-        print(f"[{os.path.basename(__file__)}] Adding Binary Asset {args.filename[0]}")
-        rom.add_binary_file(args.filename[0], args.address)
+        print(f"[{os.path.basename(__file__)}] Adding binary asset {args.filename[0]}")
+        rom.add_binary_file(
+            args.filename[0],
+            data=args.address,
+            nmi=args.nmi,
+            reset=args.reset,
+            irq=args.irq,
+        )
         for file in args.filename[1:]:
-            print(f"[{os.path.basename(__file__)}] Adding ROM Asset {file}")
+            print(f"[{os.path.basename(__file__)}] Adding ROM asset {file}")
             rom.add_rp6502_file(file)
         with open(args.out, "wb+") as file:
             file.write(b"#!RP6502\n")
