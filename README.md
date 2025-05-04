@@ -37,10 +37,12 @@ $ code .
 Install the extensions and choose the default or obvious choice if VSCode
 prompts you.
 
-You can build with F7. Running a program is done with "Run Build Task..."
-CTRL-SHIFT-B. If the default communications device doesn't work, edit ".rp6502"
-in the project root folder. This file will be created the first time you
-"Run Build Task..." and will be ignored by git.
+"Start Debugging" (F5) will build your project and upload it to the
+Picocomputer over a USB cable plugged into the Pico VGA. There is no debugger
+for the 6502; this process will exit immediately after the upload.
+If the default communications device doesn't work, edit ".rp6502" in the
+project root folder. This file will be created the first time you
+"Start Debugging" and will be ignored by git.
 
 Edit CMakeLists.txt to add new source and asset files. It's
 pretty normal C/ASM development from here on.

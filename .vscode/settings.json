@@ -13,7 +13,14 @@
     ],
     "cmake.showSystemKits": false,
     "cmake.preferredGenerators": [
-        "Ninja",
         "Unix Makefiles",
     ],
+    "cmake.options.advanced": {
+        "launch": {
+            "statusBarVisibility": "hidden",
+        },
+        "debug": {
+            "statusBarVisibility": "hidden",
+        }
+    },
 }
