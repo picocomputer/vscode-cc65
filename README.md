@@ -14,16 +14,16 @@ the one you aren't using.
 
 ### Windows Tools Install:
  * `winget install -e --id Microsoft.VisualStudioCode`
+ * `winget install -e --id Git.Git`
+ * `winget install -e --id Kitware.CMake`
+ * `winget install -e --id GnuWin32.Make`
+    Add `C:\Program Files (x86)\GnuWin32\bin` to your PATH.
  * A source build of [CC65](https://cc65.github.io/getting-started.html) -
    Do not skip the step about adding the `bin` directory to your PATH.
  * Install Python by typing `python3` in a command prompt, which will launch
    the Microsoft Store where you can start the installation. If Python runs,
    this has already been done — exit Python with Ctrl-Z plus Enter.
- * `pip install pyserial`.
- * `winget install -e --id Kitware.CMake`
- * `winget install -e --id GnuWin32.Make`
-    Add `C:\Program Files (x86)\GnuWin32\bin` to your PATH.
- * `winget install -e --id Git.Git`
+ * `pip install pyserial`
 
 ### Getting Started:
 Go to the [GitHub template](https://github.com/picocomputer/vscode-cc65) and
