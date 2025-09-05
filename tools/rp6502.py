@@ -17,8 +17,10 @@ import configparser
 import platform
 import sys
 import select
+import ctypes
 from typing import Union
 
+# Detect POSIX terminal
 try:
     import tty
 except:
@@ -49,6 +51,7 @@ class Console:
 
     def terminal(self, cp):
         """Dispatch to the correct terminal emulator"""
+        print("Console terminal. CTRL-A then B for break or X for exit.")
         if "tty" in globals():
             self.term_posix(cp)
         else:
@@ -56,7 +59,6 @@ class Console:
 
     def term_posix(self, cp: str):
         """POSIX terminal emulator for Linux, BSD, MacOS, etc."""
-        print("Console terminal. CTRL-A then B for break or X for exit.")
         tty.setraw(sys.stdin.fileno())
         ctrl_a_pressed = False
         while True:
@@ -88,9 +90,168 @@ class Console:
                     sys.stdout.flush()
 
     def term_windows(self, cp):
-        """Windows terminal emulator"""
-        # TODO
-        pass
+        """Windows terminal emulator using Console API"""
+        ctrl_a_pressed = False
+        while True:
+            try:
+                if self.serial.in_waiting > 0:
+                    data = self.serial.read(1)
+                    if len(data) > 0:
+                        try:
+                            sys.stdout.write(data.decode(cp))
+                        except UnicodeDecodeError:
+                            sys.stdout.write(f"\\x{data[0]:02x}")
+                        sys.stdout.flush()
+                key_in = self.term_windows_keyboard()
+                if key_in:
+                    if key_in == "\x01":  # CTRL-A
+                        ctrl_a_pressed = True
+                        self.serial.write(key_in.encode(cp))
+                    elif ctrl_a_pressed and key_in.lower() in "bf":
+                        self.send_break()  # eats prompt
+                        sys.stdout.write("\r\n]")  # fake prompt
+                        ctrl_a_pressed = False
+                    elif ctrl_a_pressed and key_in.lower() in "xq":
+                        sys.stdout.write("\r\n")
+                        break
+                    else:
+                        ctrl_a_pressed = False
+                        self.serial.write(key_in.encode(cp))
+                else:
+                    if self.serial.in_waiting == 0:
+                        time.sleep(0.001)
+            except KeyboardInterrupt:
+                # Handle Ctrl-C: send it to the serial device instead of exiting
+                self.serial.write(b"\x03")
+
+    def term_windows_keyboard(self) -> Union[str, None]:
+        """Get a key event as ANSI using Windows Console API"""
+
+        # FFI setup
+        from ctypes import wintypes
+
+        if not hasattr(self, "_stdin_handle"):
+            self._stdin_handle = ctypes.windll.kernel32.GetStdHandle(-10)
+
+        class KEY_EVENT_RECORD(ctypes.Structure):
+            _fields_ = [
+                ("bKeyDown", wintypes.BOOL),
+                ("wRepeatCount", wintypes.WORD),
+                ("wVirtualKeyCode", wintypes.WORD),
+                ("wVirtualScanCode", wintypes.WORD),
+                ("uChar", wintypes.WCHAR),
+                ("dwControlKeyState", wintypes.DWORD),
+            ]
+
+        class INPUT_RECORD(ctypes.Structure):
+            _fields_ = [
+                ("EventType", wintypes.WORD),
+                ("Event", KEY_EVENT_RECORD),
+            ]
+
+        # Check if input is available
+        events_available = wintypes.DWORD()
+        ctypes.windll.kernel32.GetNumberOfConsoleInputEvents(
+            self._stdin_handle, ctypes.byref(events_available)
+        )
+        if events_available.value == 0:
+            return None
+
+        # Read input event
+        input_record = INPUT_RECORD()
+
+        if not ctypes.windll.kernel32.ReadConsoleInputW(
+            self._stdin_handle,
+            ctypes.byref(input_record),
+            1,
+            ctypes.byref(wintypes.DWORD()),
+        ):
+            return None
+
+        # Only process key down events (EventType 1 = KEY_EVENT)
+        if input_record.EventType != 1 or not input_record.Event.bKeyDown:
+            return None
+
+        # Modifier state
+        alt = bool(input_record.Event.dwControlKeyState & (0x0001 | 0x0002))
+        ctrl = bool(input_record.Event.dwControlKeyState & (0x0004 | 0x0008))
+        shift = bool(input_record.Event.dwControlKeyState & 0x0010)
+        modifier = 1
+        if shift:
+            modifier += 1
+        if alt:
+            modifier += 2
+        if ctrl:
+            modifier += 4
+        if modifier == 1:
+            modifier = False
+
+        # Virtual key codes
+        vk_code = input_record.Event.wVirtualKeyCode
+        if vk_code == 0x0D:  # Enter/Return
+            return "\r"
+        elif vk_code == 0x08:  # Backspace
+            return "\x7f"  # DEL character for backspace
+        elif vk_code == 0x09:  # Tab
+            return "\t"
+        elif vk_code == 0x1B:  # Escape
+            return "\x1b"
+        elif vk_code == 0x20:  # Space
+            return " "
+        elif vk_code == 0x70:  # F1
+            return f"\x1b[1;{modifier}P" if modifier else "\x1bOP"
+        elif vk_code == 0x71:  # F2
+            return f"\x1b[1;{modifier}Q" if modifier else "\x1bOQ"
+        elif vk_code == 0x72:  # F3
+            return f"\x1b[1;{modifier}R" if modifier else "\x1bOR"
+        elif vk_code == 0x73:  # F4
+            return f"\x1b[1;{modifier}S" if modifier else "\x1bOS"
+        elif vk_code == 0x74:  # F5
+            return f"\x1b[15;{modifier}~" if modifier else "\x1b[15~"
+        elif vk_code == 0x75:  # F6
+            return f"\x1b[17;{modifier}~" if modifier else "\x1b[17~"
+        elif vk_code == 0x76:  # F7
+            return f"\x1b[18;{modifier}~" if modifier else "\x1b[18~"
+        elif vk_code == 0x77:  # F8
+            return f"\x1b[19;{modifier}~" if modifier else "\x1b[19~"
+        elif vk_code == 0x78:  # F9
+            return f"\x1b[20;{modifier}~" if modifier else "\x1b[20~"
+        elif vk_code == 0x79:  # F10
+            return f"\x1b[21;{modifier}~" if modifier else "\x1b[21~"
+        elif vk_code == 0x7A:  # F11
+            return f"\x1b[23;{modifier}~" if modifier else "\x1b[23~"
+        elif vk_code == 0x7B:  # F12
+            return f"\x1b[24;{modifier}~" if modifier else "\x1b[24~"
+        elif vk_code == 0x26:  # Up arrow
+            return f"\x1b[1;{modifier}A" if modifier else "\x1b[A"
+        elif vk_code == 0x28:  # Down arrow
+            return f"\x1b[1;{modifier}B" if modifier else "\x1b[B"
+        elif vk_code == 0x27:  # Right arrow
+            return f"\x1b[1;{modifier}C" if modifier else "\x1b[C"
+        elif vk_code == 0x25:  # Left arrow
+            return f"\x1b[1;{modifier}D" if modifier else "\x1b[D"
+        elif vk_code == 0x24:  # Home
+            return f"\x1b[1;{modifier}H" if modifier else "\x1b[H"
+        elif vk_code == 0x23:  # End
+            return f"\x1b[1;{modifier}F" if modifier else "\x1b[F"
+        elif vk_code == 0x21:  # Page Up
+            return f"\x1b[5;{modifier}~" if modifier else "\x1b[5~"
+        elif vk_code == 0x22:  # Page Down
+            return f"\x1b[6;{modifier}~" if modifier else "\x1b[6~"
+        elif vk_code == 0x2D:  # Insert
+            return f"\x1b[2;{modifier}~" if modifier else "\x1b[2~"
+        elif vk_code == 0x2E:  # Delete
+            return f"\x1b[3;{modifier}~" if modifier else "\x1b[3~"
+
+        # Control characters
+        if ctrl and not alt and 65 <= vk_code <= 90:
+            return chr(vk_code - 64)
+
+        # Plain characters as Unicode
+        char = input_record.Event.uChar
+        if char and ord(char) >= 32:
+            return char
+        return None
 
     def send_break(self, duration: float = 0.01, retries: int = 1):
         """Stop the 6502 and return to monitor."""
@@ -517,8 +678,6 @@ def exec_args():
 #   rp6502 = importlib.import_module("tools.rp6502")
 if __name__ == "__main__":
     # VSCode SIGKILLs the terminal in raw mode, reset to cooked mode
-    if platform.system() == "Windows":
-        pass  # TODO if needed
-    else:
+    if "tty" in globals():
         os.system("stty sane")
     exec_args()
