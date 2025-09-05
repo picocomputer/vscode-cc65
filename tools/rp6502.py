@@ -440,7 +440,7 @@ def exec_args():
     args.reset = str_to_address(parser, args.reset, "-r/--reset")
     args.irq = str_to_address(parser, args.irq, "-i/--irq")
 
-    # python3 tools/rp6502.py run
+    # python3 rp6502.py run
     if args.command == "run":
         print(f"[{os.path.basename(__file__)}] Loading ROM {args.filename[0]}")
         rom = ROM()
@@ -461,7 +461,7 @@ def exec_args():
         if args.term:
             console.terminal(code_page)
 
-    # python3 tools/rp6502.py upload
+    # python3 rp6502.py upload
     if args.command == "upload":
         print(f"[{os.path.basename(__file__)}] Opening device {args.device}")
         console = Console(args.device)
@@ -476,7 +476,7 @@ def exec_args():
                     dest = os.path.basename(file)
                 console.upload(f, dest)
 
-    # python3 tools/rp6502.py create
+    # python3 rp6502.py create
     if args.command == "create":
         if args.out == None:
             parser.error(f"argument -o required")
