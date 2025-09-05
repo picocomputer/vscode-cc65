@@ -28,8 +28,8 @@ except:
     TERM_WINDOWS = True
 
 
-class Monitor:
-    """Manages the monitor application on the serial console."""
+class Console:
+    """Manages the RP6502 console over a serial connection."""
 
     DEFAULT_TIMEOUT = 0.5
     UART_BAUDRATE = 115200
@@ -41,13 +41,16 @@ class Monitor:
         self.serial.baudrate = self.UART_BAUDRATE
         self.serial.open()
 
-    def term(self, cp):
+    def terminal(self, cp):
+        """Dispatch to the correct terminal emulator"""
         if TERM_POSIX:
             self.term_posix(cp)
         elif TERM_WINDOWS:
             self.term_windows(cp)
 
     def term_posix(self, cp):
+        """POSIX terminal emulator for Linux, BSD, MacOS, etc."""
+        print(f"Console terminal. CTRL-A then B for break or X for exit.")
         old_tty_attr = termios.tcgetattr(sys.stdin)
         tty.setraw(sys.stdin.fileno())
         ctrl_a_pressed = False
@@ -80,6 +83,7 @@ class Monitor:
                     sys.stdout.flush()
 
     def term_windows(self, cp):
+        """Windows terminal emulator """
         # TODO
         pass
 
@@ -439,25 +443,23 @@ def exec_args():
         if args.reset != None:
             rom.add_reset_vector(args.reset)
         print(f"[{os.path.basename(__file__)}] Opening device {args.device}")
-        mon = Monitor(args.device)
-        mon.send_break()
-        mon.send_rom(rom)
+        console = Console(args.device)
+        console.send_break()
+        print(f"[{os.path.basename(__file__)}] Sending ROM")
+        console.send_rom(rom)
         if rom.has_reset_vector():
-            mon.reset()
+            console.reset()
         else:
             print(f"[{os.path.basename(__file__)}] No reset vector. Not resetting.")
         if args.term != 0:
-            print(
-                f"[{os.path.basename(__file__)}] Starting terminal. CTRL-A then B for break X for exit."
-            )
-            mon.term(f"cp{args.term}")
+            console.terminal(f"cp{args.term}")
 
     # python3 tools/rp6502.py upload
     if args.command == "upload":
         print(f"[{os.path.basename(__file__)}] Opening device {args.device}")
-        mon = Monitor(args.device)
+        console = Console(args.device)
         if len(args.filename) > 0:
-            mon.send_break()
+            console.send_break()
         for file in args.filename:
             print(f"[{os.path.basename(__file__)}] Uploading {file}")
             with open(file, "rb") as f:
@@ -465,7 +467,7 @@ def exec_args():
                     dest = args.out
                 else:
                     dest = os.path.basename(file)
-                mon.upload(f, dest)
+                console.upload(f, dest)
 
     # python3 tools/rp6502.py create
     if args.command == "create":
