@@ -17,6 +17,17 @@ import configparser
 import platform
 from typing import Union
 
+try:
+    import sys
+    import select
+    import termios
+    import tty
+
+    TERM_POSIX = True
+except:
+    # TODO import something
+    TERM_WINDOWS = True
+
 
 class Monitor:
     """Manages the monitor application on the serial console."""
@@ -30,6 +41,48 @@ class Monitor:
         self.serial.timeout = timeout
         self.serial.baudrate = self.UART_BAUDRATE
         self.serial.open()
+
+    def term(self, cp):
+        if TERM_POSIX:
+            self.term_posix(cp)
+        elif TERM_WINDOWS:
+            self.term_windows(cp)
+
+    def term_posix(self, cp):
+        old_tty_attr = termios.tcgetattr(sys.stdin)
+        tty.setraw(sys.stdin.fileno())
+        ctrl_a_pressed = False
+        while True:
+            ready, _, _ = select.select([sys.stdin, self.serial], [], [], 0.01)
+            if sys.stdin in ready:
+                char = sys.stdin.read(1)
+                if char:
+                    if char == "\x01":  # CTRL-A
+                        ctrl_a_pressed = True
+                        self.serial.write(char.encode(cp))
+                    elif ctrl_a_pressed and char == "\x02":  # CTRL-B
+                        self.send_break()
+                        self.serial.write("\r\n]")
+                        ctrl_a_pressed = False
+                        continue
+                    elif char == "\x04":  # CTRL-D
+                        break
+                    else:
+                        ctrl_a_pressed = False
+                        self.serial.write(char.encode(cp))
+            if self.serial in ready:
+                data = self.serial.read(1)
+                if len(data) > 0:
+                    try:
+                        sys.stdout.write(data.decode(cp))
+                    except UnicodeDecodeError:
+                        sys.stdout.write(f"\\x{data[0]:02x}")
+                    sys.stdout.flush()
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_tty_attr)
+
+    def term_windows(self, cp):
+        # TODO
+        pass
 
     def send_break(self, duration=0.01, retries=1):
         """Stop the 6502 and return to monitor."""
@@ -329,7 +382,7 @@ def exec_args():
         "--config",
         dest="config",
         metavar="name",
-        help=f"Configuration file for serial device.",
+        help=f"Configuration file for console connection.",
     )
     parser.add_argument(
         "-D",
@@ -339,18 +392,28 @@ def exec_args():
         default=default_device,
         help=f"Serial device name. Default={default_device}",
     )
+    parser.add_argument(
+        "-t",
+        "--term",
+        dest="term",
+        metavar="cp",
+        default=437,
+        type=int,
+        help=f"Setting 0 disables terminal on run.",
+    )
     args = parser.parse_args()
 
     # Standard library configuration parser
     if args.config:
         config = configparser.ConfigParser()
         if not os.path.exists(args.config):
-            config["RP6502"] = {"device": args.device}
+            config["RP6502"] = {"device": args.device, "term": args.term}
             config.write(open(args.config, "w"))
         else:
             config.read(args.config)
         if config.has_section("RP6502"):
             args.device = config["RP6502"].get("device", args.device)
+            args.term = config["RP6502"].get("term", args.term)
 
     # Additional validation and conversion
     def str_to_address(parser, str, errmsg):
@@ -383,7 +446,9 @@ def exec_args():
         if rom.has_reset_vector():
             mon.reset()
         else:
-            print("No reset vector. Not resetting.")
+            print(f"[{os.path.basename(__file__)}] No reset vector. Not resetting.")
+        if args.term != 0:
+            mon.term(f"cp{args.term}")
 
     # python3 tools/rp6502.py upload
     if args.command == "upload":
