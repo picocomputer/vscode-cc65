@@ -15,17 +15,14 @@ import binascii
 import argparse
 import configparser
 import platform
+import sys
+import select
 from typing import Union
 
 try:
-    import sys
-    import select
-    import termios
     import tty
-
-    TERM_POSIX = True
 except:
-    TERM_WINDOWS = True
+    pass
 
 
 class Console:
@@ -34,7 +31,8 @@ class Console:
     DEFAULT_TIMEOUT = 0.5
     UART_BAUDRATE = 115200
 
-    def __init__(self, name, timeout=DEFAULT_TIMEOUT):
+    def __init__(self, name: str, timeout: float = DEFAULT_TIMEOUT):
+        """Initialize console over serial connection."""
         self.serial = serial.Serial()
         self.serial.setPort(name)
         self.serial.timeout = timeout
@@ -43,15 +41,14 @@ class Console:
 
     def terminal(self, cp):
         """Dispatch to the correct terminal emulator"""
-        if TERM_POSIX:
+        if "tty" in globals():
             self.term_posix(cp)
-        elif TERM_WINDOWS:
+        else:
             self.term_windows(cp)
 
-    def term_posix(self, cp):
+    def term_posix(self, cp: str):
         """POSIX terminal emulator for Linux, BSD, MacOS, etc."""
-        print(f"Console terminal. CTRL-A then B for break or X for exit.")
-        old_tty_attr = termios.tcgetattr(sys.stdin)
+        print("Console terminal. CTRL-A then B for break or X for exit.")
         tty.setraw(sys.stdin.fileno())
         ctrl_a_pressed = False
         while True:
@@ -66,9 +63,9 @@ class Console:
                         self.send_break()  # eats prompt
                         sys.stdout.write("\r\n]")  # fake prompt
                         ctrl_a_pressed = False
-                    elif ctrl_a_pressed and char.lower() == "x":
+                    elif ctrl_a_pressed and char.lower() in "xq":  # q is minicom
                         sys.stdout.write("\r\n")
-                        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_tty_attr)
+                        os.system("stty sane")
                         break
                     else:
                         ctrl_a_pressed = False
@@ -83,11 +80,11 @@ class Console:
                     sys.stdout.flush()
 
     def term_windows(self, cp):
-        """Windows terminal emulator """
+        """Windows terminal emulator"""
         # TODO
         pass
 
-    def send_break(self, duration=0.01, retries=1):
+    def send_break(self, duration: float = 0.01, retries: int = 1):
         """Stop the 6502 and return to monitor."""
         self.serial.read_all()
         self.serial.send_break(duration)
@@ -99,9 +96,9 @@ class Console:
                 raise te
         self.send_break(duration, retries - 1)
 
-    def command(self, str, timeout=DEFAULT_TIMEOUT):
-        """Send one command and wait for next monitor prompt"""
-        self.serial.write(bytes(str, "ascii"))
+    def command(self, cmd: str, timeout: float = DEFAULT_TIMEOUT):
+        """Send one command and wait for next monitor prompt."""
+        self.serial.write(bytes(cmd, "ascii"))
         self.serial.write(b"\r")
         self.wait_for_prompt("]", timeout)
 
@@ -110,15 +107,15 @@ class Console:
         self.serial.write(b"RESET\r")
         self.serial.read_until()
 
-    def binary(self, addr: int, data):
+    def binary(self, addr: int, data: bytes):
         """Send data to memory using BINARY command."""
         command = f"BINARY ${addr:04X} ${len(data):03X} ${binascii.crc32(data):08X}\r"
         self.serial.write(bytes(command, "utf-8"))
         self.serial.write(data)
         self.wait_for_prompt("]")
 
-    def upload(self, file, name):
-        """Upload readable file to remote file "name" """
+    def upload(self, file, name: str):
+        """Upload readable file to remote file "name"."""
         self.serial.write(bytes(f"UPLOAD {name}\r", "ascii"))
         self.wait_for_prompt("}")
         file.seek(0)
@@ -136,25 +133,25 @@ class Console:
     def send_rom(self, rom):
         """Send rom."""
         addr, data = rom.next_rom_data(0)
-        while data != None:
+        while data is not None:
             self.binary(addr, data)
             addr += len(data)
             addr, data = rom.next_rom_data(addr)
 
-    def wait_for_prompt(self, prompt, timeout=DEFAULT_TIMEOUT):
-        """Wait for prompt."""
-        prompt = bytes(prompt, "ascii")
+    def wait_for_prompt(self, prompt: str, timeout: float = DEFAULT_TIMEOUT):
+        """Wait for a specific prompt from the device."""
+        prompt_bytes = bytes(prompt, "ascii")
         start = time.monotonic()
         while True:
             if len(prompt) == 1:
                 data = self.serial.read()
             else:
                 data = self.serial.read_until()
-            if data[0:1] == b"?":
+            if data.startswith(b"?"):
                 monitor_result = data.decode("ascii")
                 monitor_result += self.serial.read_until().decode("ascii").strip()
                 raise RuntimeError(monitor_result)
-            if data == prompt:
+            if data == prompt_bytes:
                 break
             if len(data) == 0:
                 if time.monotonic() - start > timeout:
@@ -171,25 +168,24 @@ class ROM:
         self.data = [0 for i in range(0x20000)]
         self.alloc = [0 for i in range(0x20000)]
 
-    def add_help(self, string):
+    def add_help(self, string: str):
         """Add help string."""
         if len(string) > 80:
-            raise RuntimeError("Help line too long")
+            raise RuntimeError("Help line > 80 cols")
         self.help.append(string)
         if len(self.help) > 24:
-            raise RuntimeError("Help lines > 24")
+            raise RuntimeError("Help lines > 24 rows")
 
-    def add_binary_data(self, data, addr: int):
-        """Add binary data."""
-        offset = 0
+    def add_binary_data(self, data: bytes, addr: int):
+        """Add binary data to ROM."""
         length = len(data)
         self.allocate_rom(addr, length)
         for i in range(length):
-            self.data[addr + i] = data[offset + i]
+            self.data[addr + i] = data[i]
 
     def add_nmi_vector(self, addr: int):
         """Set NMI vector in $FFFA and $FFFB."""
-        if addr < 0 or addr > 0xFFFF:
+        if not (0 <= addr <= 0xFFFF):
             raise RuntimeError(f"Invalid NMI vector: ${addr:04X}")
         self.allocate_rom(0xFFFA, 2)
         self.data[0xFFFA] = addr & 0xFF
@@ -197,7 +193,7 @@ class ROM:
 
     def add_reset_vector(self, addr: int):
         """Set reset vector in $FFFC and $FFFD."""
-        if addr < 0 or addr > 0xFFFF:
+        if not (0 <= addr <= 0xFFFF):
             raise RuntimeError(f"Invalid reset vector: ${addr:04X}")
         self.allocate_rom(0xFFFC, 2)
         self.data[0xFFFC] = addr & 0xFF
@@ -205,45 +201,41 @@ class ROM:
 
     def add_irq_vector(self, addr: int):
         """Set IRQ vector in $FFFE and $FFFF."""
-        if addr < 0 or addr > 0xFFFF:
+        if not (0 <= addr <= 0xFFFF):
             raise RuntimeError(f"Invalid IRQ vector: ${addr:04X}")
         self.allocate_rom(0xFFFE, 2)
         self.data[0xFFFE] = addr & 0xFF
         self.data[0xFFFF] = addr >> 8
 
-    def add_binary_file(
-        self,
-        file,
-        **addr,
-    ):
+    def add_binary_file(self, file: str, **addr):
         """Add binary memory data from file. The addr kwargs are: data, nmi, reset, and irq."""
         """Data is where to load the data, the rest are CPU vectors for $FFFA-$FFFF."""
         """Addresses should be an int, None to not provide, or True to read from the file."""
         """Vectors are read from the file in the order listed above."""
         with open(file, "rb") as f:
             data = f.read()
-        if addr["data"] == None:
+        if addr["data"] is None:
             raise RuntimeError("Address for data is required.")
-        if addr["data"] == True:
+        if addr["data"] is True:
             if len(data) < 2:
                 raise RuntimeError("No data address found in file.")
             addr["data"] = data[0] + data[1] * 256
             data = data[2:]
-        if addr["nmi"] == True:
+        if addr["nmi"] is True:
             if len(data) < 2:
                 raise RuntimeError("No nmi address found in file.")
             addr["nmi"] = data[0] + data[1] * 256
             data = data[2:]
         if addr["nmi"]:
             self.add_nmi_vector(addr["nmi"])
-        if addr["reset"] == True:
+        if addr["reset"] is True:
             if len(data) < 2:
                 raise RuntimeError("No reset address found in file.")
             addr["reset"] = data[0] + data[1] * 256
             data = data[2:]
         if addr["reset"]:
             self.add_reset_vector(addr["reset"])
-        if addr["irq"] == True:
+        if addr["irq"] is True:
             if len(data) < 2:
                 raise RuntimeError("No irq address found in file.")
             addr["irq"] = data[0] + data[1] * 256
@@ -252,40 +244,40 @@ class ROM:
             self.add_irq_vector(addr["irq"])
         self.add_binary_data(data, addr["data"])
 
-    def add_rp6502_file(self, file):
+    def add_rp6502_file(self, file: str):
         """Add RP6502 ROM data from file."""
         with open(file, "rb") as f:
             # Decode first line as cp850 because binary garbage can
             # raise here before our better message gets to the user.
             command = f.readline().decode("cp850")
-            if not re.match("^#![Rr][Pp]6502(\r|)\n$", command):
+            if not re.match(r"^#![Rr][Pp]6502(\r|)\n$", command):
                 raise RuntimeError(f"Invalid RP6502 ROM file: {file}")
             while True:
                 command = f.readline().decode("ascii").rstrip()
                 if len(command) == 0:
                     break
-                se = re.search("^ *(# )", command)
-                if se:
-                    self.add_help(command[se.start(1) + 2 :])
+                help_match = re.search(r"^ *(# )", command)
+                if help_match:
+                    self.add_help(command[help_match.start(1) + 2 :])
                     continue
-                if re.search("^ *#$", command):
+                if re.search(r"^ *#$", command):
                     self.add_help("")
                     continue
-                se = re.search("^ *([^ ]+) *([^ ]+) *([^ ]+) *$", command)
-                if se:
+                data_match = re.search(r"^ *([^ ]+) *([^ ]+) *([^ ]+) *$", command)
+                if data_match:
 
-                    def str_to_address(str):
+                    def str_to_address(addr_str: str) -> int:
                         """Supports $FFFF number format."""
-                        if str:
-                            str = re.sub("^\\$", "0x", str)
-                        if re.match("^(0x|)[0-9A-Fa-f]*$", str):
-                            return eval(str)
+                        if addr_str:
+                            addr_str = re.sub(r"^\$", "0x", addr_str)
+                        if re.match(r"^(0x|)[0-9A-Fa-f]*$", addr_str):
+                            return int(addr_str, 0)
                         else:
-                            raise RuntimeError(f"Invalid address: {str}")
+                            raise RuntimeError(f"Invalid address: {addr_str}")
 
-                    addr = str_to_address(se.group(1))
-                    length = str_to_address(se.group(2))
-                    crc = str_to_address(se.group(3))
+                    addr = str_to_address(data_match.group(1))
+                    length = str_to_address(data_match.group(2))
+                    crc = str_to_address(data_match.group(3))
                     self.allocate_rom(addr, length)
                     data = f.read(length)
                     if len(data) != length or crc != binascii.crc32(data):
@@ -295,8 +287,8 @@ class ROM:
                     continue
                 raise RuntimeError(f"Corrupt RP6502 ROM file: {file}")
 
-    def allocate_rom(self, addr, length):
-        """Marks a range of memory as used. Raises on error."""
+    def allocate_rom(self, addr: int, length: int):
+        """Marks a range of memory as used."""
         if (
             (addr < 0x10000 and addr + length > 0x10000)
             or addr + length > 0x20000
@@ -311,9 +303,9 @@ class ROM:
                 raise MemoryError(f"RP6502 ROM data already exists at ${addr+i:04X}")
             self.alloc[addr + i] = 1
 
-    def has_reset_vector(self):
+    def has_reset_vector(self) -> bool:
         """Returns true if $FFFC and $FFFD have been set."""
-        return self.alloc[0xFFFC] and self.alloc[0xFFFD]
+        return bool(self.alloc[0xFFFC] and self.alloc[0xFFFD])
 
     def next_rom_data(self, addr: int):
         """Find next up-to-1k chunk starting at addr."""
@@ -510,6 +502,8 @@ def exec_args():
 #   rp6502 = importlib.import_module("tools.rp6502")
 if __name__ == "__main__":
     # VSCode SIGKILLs the terminal in raw mode, reset to cooked mode
-    if TERM_POSIX:
+    if platform.system() == "Windows":
+        pass  # TODO if needed
+    else:
         os.system("stty sane")
     exec_args()
