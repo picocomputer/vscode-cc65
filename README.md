@@ -43,11 +43,15 @@ are constantly improving and changing making it too difficult to maintain
 documentation.
 
 "Start Debugging" (F5) will build your project and upload it to the
-Picocomputer over a USB cable plugged into the Pico VGA. There is no debugger
-for the 6502; this process will exit immediately after the upload. If the
-default communication device doesn't work, edit `.rp6502` in the project root
-folder. This file will be created the first time you run "Start Debugging"
-and will be ignored by git.
+Picocomputer over a USB cable plugged into the RP6502 VGA USB port.
+
+If you get a Python error about the communications device not being found,
+edit `.rp6502` in the project root. This file will be created the first time
+you "Start Debugging" and will be ignored by git.
+
+Once the upload is complete, a debug console becomes available on the terminal
+tab. It will say "Python Debug Console" because the rp6502.py tool is Python.
+Ctrl-A then X will exit. Ctrl-A then B will send a break.
 
 Edit `CMakeLists.txt` to add new source and asset files. From here on, it's
 standard C/assembly development for the 6502 platform.

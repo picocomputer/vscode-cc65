@@ -25,7 +25,6 @@ try:
 
     TERM_POSIX = True
 except:
-    # TODO import something
     TERM_WINDOWS = True
 
 
@@ -53,19 +52,20 @@ class Monitor:
         tty.setraw(sys.stdin.fileno())
         ctrl_a_pressed = False
         while True:
-            ready, _, _ = select.select([sys.stdin, self.serial], [], [], 0.01)
+            ready, _, _ = select.select([sys.stdin, self.serial], [], [], None)
             if sys.stdin in ready:
                 char = sys.stdin.read(1)
                 if char:
                     if char == "\x01":  # CTRL-A
                         ctrl_a_pressed = True
                         self.serial.write(char.encode(cp))
-                    elif ctrl_a_pressed and char == "\x02":  # CTRL-B
-                        self.send_break()
-                        self.serial.write("\r\n]")
+                    elif ctrl_a_pressed and char.lower() in "bf":  # f is minicom
+                        self.send_break()  # eats prompt
+                        sys.stdout.write("\r\n]")  # fake prompt
                         ctrl_a_pressed = False
-                        continue
-                    elif char == "\x04":  # CTRL-D
+                    elif ctrl_a_pressed and char.lower() == "x":
+                        sys.stdout.write("\r\n")
+                        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_tty_attr)
                         break
                     else:
                         ctrl_a_pressed = False
@@ -78,7 +78,6 @@ class Monitor:
                     except UnicodeDecodeError:
                         sys.stdout.write(f"\\x{data[0]:02x}")
                     sys.stdout.flush()
-        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_tty_attr)
 
     def term_windows(self, cp):
         # TODO
@@ -413,7 +412,7 @@ def exec_args():
             config.read(args.config)
         if config.has_section("RP6502"):
             args.device = config["RP6502"].get("device", args.device)
-            args.term = config["RP6502"].get("term", args.term)
+            args.term = int(config["RP6502"].get("term", args.term))
 
     # Additional validation and conversion
     def str_to_address(parser, str, errmsg):
@@ -448,6 +447,9 @@ def exec_args():
         else:
             print(f"[{os.path.basename(__file__)}] No reset vector. Not resetting.")
         if args.term != 0:
+            print(
+                f"[{os.path.basename(__file__)}] Starting terminal. CTRL-A then B for break X for exit."
+            )
             mon.term(f"cp{args.term}")
 
     # python3 tools/rp6502.py upload
@@ -505,4 +507,7 @@ def exec_args():
 #   import importlib
 #   rp6502 = importlib.import_module("tools.rp6502")
 if __name__ == "__main__":
+    # VSCode SIGKILLs the terminal in raw mode, reset to cooked mode
+    if TERM_POSIX:
+        os.system("stty sane")
     exec_args()
