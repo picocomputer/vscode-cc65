@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 #
-# Copyright (c) 2023 Rumbledethumps
+# Copyright (c) 2025 Rumbledethumps
 #
 # SPDX-License-Identifier: BSD-3-Clause
 # SPDX-License-Identifier: Unlicense
 
-# Control RP6502 RIA via UART
+# Developer tool for RP6502
 
 import os
 import re
@@ -38,6 +38,14 @@ class Console:
         self.serial.timeout = timeout
         self.serial.baudrate = self.UART_BAUDRATE
         self.serial.open()
+
+    def code_page(self, timeout: float = DEFAULT_TIMEOUT) -> str:
+        """Fetch code page to use for for terminal"""
+        self.serial.write(bytes("set cp", "ascii"))
+        self.serial.write(b"\r")
+        self.wait_for_prompt(":", timeout)
+        result = self.serial.read_until().decode("ascii")
+        return f"cp{re.sub(r"[^0-9]", "", result)}"
 
     def terminal(self, cp):
         """Dispatch to the correct terminal emulator"""
@@ -333,13 +341,13 @@ def exec_args():
 
     # Standard library argument parser
     parser = argparse.ArgumentParser(
-        description="Interface with RP6502 RIA console via UART. Manage RP6502 ROM asset packaging."
+        description="Interface with RP6502 RIA console. Manage RP6502 ROM packaging."
     )
     parser.add_argument(
         "command",
         choices=["run", "upload", "create"],
         help="{Run} local RP6502 ROM file by sending to RP6502 RAM. "
-        "{Upload} any local files to RP6502 USB MSC drive. "
+        "{Upload} any local files to RP6502 USB storage. "
         "{Create} RP6502 ROM file from a local binary file and additional local ROM files. ",
     )
     parser.add_argument("filename", nargs="*", help="Local filename(s).")
@@ -391,10 +399,9 @@ def exec_args():
         "-t",
         "--term",
         dest="term",
-        metavar="cp",
-        default=437,
-        type=int,
-        help=f"Setting 0 disables terminal on run.",
+        metavar="bool",
+        default="True",
+        help=f"Enables console terminal on run.",
     )
     args = parser.parse_args()
 
@@ -408,7 +415,13 @@ def exec_args():
             config.read(args.config)
         if config.has_section("RP6502"):
             args.device = config["RP6502"].get("device", args.device)
-            args.term = int(config["RP6502"].get("term", args.term))
+            args.term = config["RP6502"].get("term", args.term)
+
+    # Because parser is bad at bool
+    if args.term.lower() in ["t", "true"] or (args.term.isdigit() and args.term != "0"):
+        args.term = True
+    else:
+        args.term = False
 
     # Additional validation and conversion
     def str_to_address(parser, str, errmsg):
@@ -439,12 +452,14 @@ def exec_args():
         console.send_break()
         print(f"[{os.path.basename(__file__)}] Sending ROM")
         console.send_rom(rom)
+        if args.term:
+            code_page = console.code_page()
         if rom.has_reset_vector():
             console.reset()
         else:
             print(f"[{os.path.basename(__file__)}] No reset vector. Not resetting.")
-        if args.term != 0:
-            console.terminal(f"cp{args.term}")
+        if args.term:
+            console.terminal(code_page)
 
     # python3 tools/rp6502.py upload
     if args.command == "upload":
