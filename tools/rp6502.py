@@ -191,7 +191,9 @@ class Console:
         if vk_code == 0x0D:  # Enter/Return
             return "\r"
         elif vk_code == 0x08:  # Backspace
-            return "\x7f"  # DEL character for backspace
+            return "\b"
+        elif vk_code == 0x57 and ctrl:  # Ctrl+Backspace
+            return "\b"
         elif vk_code == 0x09:  # Tab
             return "\t"
         elif vk_code == 0x1B:  # Escape
@@ -243,13 +245,20 @@ class Console:
         elif vk_code == 0x2E:  # Delete
             return f"\x1b[3;{modifier}~" if modifier else "\x1b[3~"
 
-        # Control characters
-        if ctrl and not alt and 65 <= vk_code <= 90:
-            return chr(vk_code - 64)
-
-        # Plain characters as Unicode
+        # ASCII codes
         char = input_record.Event.uChar
-        if char and ord(char) >= 32:
+        if ctrl and not alt:
+            if char:
+                ch = ord(char)
+                if ord("`") <= ch <= ord("~"):
+                    return chr(ch - 96)
+                elif ord("@") <= ch <= ord("_"):
+                    return chr(ch - 64)
+            # Ctrl+A through Ctrl+Z using virtual key codes
+            if 65 <= vk_code <= 90:
+                return chr(vk_code - 64)
+            return None
+        if char and ord(char) != 0:
             return char
         return None
 
