@@ -617,7 +617,14 @@ def exec_args():
         if args.reset != None:
             rom.add_reset_vector(args.reset)
         print(f"[{os.path.basename(__file__)}] Opening device {args.device}")
-        console = Console(args.device)
+        try:
+            console = Console(args.device)
+        except serial.SerialException as se:
+            if args.config and se.errno == 2:
+                print(
+                    f"[{os.path.basename(__file__)}] ERROR! Verify device config in {args.config}"
+                )
+            raise RuntimeError(f"Verify device config in {args.config}") from se
         console.send_break()
         print(f"[{os.path.basename(__file__)}] Sending ROM")
         console.send_rom(rom)
