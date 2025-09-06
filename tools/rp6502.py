@@ -42,7 +42,7 @@ class Console:
         self.serial.open()
 
     def code_page(self, timeout: float = DEFAULT_TIMEOUT) -> str:
-        """Fetch code page to use for for terminal"""
+        """Fetch code page to use for terminal encoding"""
         self.serial.write(bytes("set cp", "ascii"))
         self.serial.write(b"\r")
         self.wait_for_prompt(":", timeout)
@@ -52,6 +52,7 @@ class Console:
     def terminal(self, cp):
         """Dispatch to the correct terminal emulator"""
         print("Console terminal. CTRL-A then B for break or X for exit.")
+        # We also accept CTRL-A F and CTRL-A Q for minicom habits.
         if "tty" in globals():
             self.term_posix(cp)
         else:
@@ -64,22 +65,21 @@ class Console:
         while True:
             ready, _, _ = select.select([sys.stdin, self.serial], [], [], None)
             if sys.stdin in ready:
-                char = sys.stdin.read(1)
-                if char:
-                    if char == "\x01":  # CTRL-A
-                        ctrl_a_pressed = True
-                        self.serial.write(char.encode(cp))
-                    elif ctrl_a_pressed and char.lower() in "bf":  # f is minicom
-                        self.send_break()  # eats prompt
-                        sys.stdout.write("\r\n]")  # fake prompt
-                        ctrl_a_pressed = False
-                    elif ctrl_a_pressed and char.lower() in "xq":  # q is minicom
-                        sys.stdout.write("\r\n")
-                        os.system("stty sane")
-                        break
-                    else:
-                        ctrl_a_pressed = False
-                        self.serial.write(char.encode(cp))
+                char = os.read(sys.stdin.fileno(), 1).decode("utf-8", errors="ignore")
+                if char == "\x01":  # CTRL-A
+                    ctrl_a_pressed = True
+                    self.serial.write(char.encode(cp))
+                elif ctrl_a_pressed and char.lower() in "bf":
+                    self.send_break()  # eats prompt
+                    sys.stdout.write("\r\n]")  # fake prompt
+                    ctrl_a_pressed = False
+                elif ctrl_a_pressed and char.lower() in "xq":
+                    sys.stdout.write("\r\n")
+                    os.system("stty sane")
+                    break
+                else:
+                    ctrl_a_pressed = False
+                    self.serial.write(char.encode(cp))
             if self.serial in ready:
                 data = self.serial.read(1)
                 if len(data) > 0:
@@ -121,7 +121,6 @@ class Console:
                     if self.serial.in_waiting == 0:
                         time.sleep(0.001)
             except KeyboardInterrupt:
-                # Handle Ctrl-C: send it to the serial device instead of exiting
                 self.serial.write(b"\x03")
 
     def term_windows_keyboard(self) -> Union[str, None]:
