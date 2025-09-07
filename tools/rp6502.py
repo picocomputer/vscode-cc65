@@ -621,10 +621,11 @@ def exec_args():
             console = Console(args.device)
         except serial.SerialException as se:
             if args.config and se.errno == 2:
-                print(
-                    f"[{os.path.basename(__file__)}] ERROR! Verify device config in {args.config}"
-                )
-            raise RuntimeError(f"Verify device config in {args.config}") from se
+                look_in_config_hint = f"Verify device config in {args.config}"
+                print(f"[{os.path.basename(__file__)}] {look_in_config_hint}")
+                raise RuntimeError(look_in_config_hint) from se
+            else:
+                raise
         console.send_break()
         print(f"[{os.path.basename(__file__)}] Sending ROM")
         console.send_rom(rom)
