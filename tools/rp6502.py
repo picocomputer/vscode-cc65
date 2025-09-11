@@ -33,6 +33,17 @@ class Console:
     DEFAULT_TIMEOUT = 0.5
     UART_BAUDRATE = 115200
 
+    def default_device():
+        # Hint at where the USB CDC mounts on various OSs
+        if platform.system() == "Windows":
+            return "COM1"
+        elif platform.system() == "Darwin":
+            return "/dev/tty.usbmodem"
+        elif platform.system() == "Linux":
+            return "/dev/ttyACM0"
+        else:
+            return "/dev/tty"
+
     def __init__(self, name: str, timeout: float = DEFAULT_TIMEOUT):
         """Initialize console over serial connection."""
         self.serial = serial.Serial()
@@ -43,8 +54,7 @@ class Console:
 
     def code_page(self, timeout: float = DEFAULT_TIMEOUT) -> str:
         """Fetch code page to use for terminal encoding"""
-        self.serial.write(bytes("set cp", "ascii"))
-        self.serial.write(b"\r")
+        self.serial.write(b"set cp\r")
         self.wait_for_prompt(":", timeout)
         result = self.serial.read_until().decode("ascii")
         return f"cp{re.sub(r"[^0-9]", "", result)}"
@@ -328,7 +338,7 @@ class Console:
                 monitor_result = data.decode("ascii")
                 monitor_result += self.serial.read_until().decode("ascii").strip()
                 raise RuntimeError(monitor_result)
-            if data == prompt_bytes:
+            if data.lower() == prompt_bytes.lower():
                 break
             if len(data) == 0:
                 if time.monotonic() - start > timeout:
@@ -498,26 +508,17 @@ class ROM:
 
 
 def exec_args():
-    # Give a hint at where the USB CDC mounts on various OSs
-    if platform.system() == "Windows":
-        default_device = "COM1"
-    elif platform.system() == "Darwin":
-        default_device = "/dev/tty.usbmodem"
-    elif platform.system() == "Linux":
-        default_device = "/dev/ttyACM0"
-    else:
-        default_device = "/dev/tty"
-
     # Standard library argument parser
     parser = argparse.ArgumentParser(
         description="Interface with RP6502 RIA console. Manage RP6502 ROM packaging."
     )
     parser.add_argument(
         "command",
-        choices=["run", "upload", "create"],
+        choices=["run", "upload", "basic", "create"],
         help="{Run} local RP6502 ROM file by sending to RP6502 RAM. "
         "{Upload} any local files to RP6502 USB storage. "
-        "{Create} RP6502 ROM file from a local binary file and additional local ROM files. ",
+        "{Basic} executes a program with the installed BASIC. "
+        "{Create} RP6502 ROM file from a local binary file and additional local ROM files.",
     )
     parser.add_argument("filename", nargs="*", help="Local filename(s).")
     parser.add_argument("-o", dest="out", metavar="name", help="Output path/filename.")
@@ -561,8 +562,8 @@ def exec_args():
         "--device",
         dest="device",
         metavar="dev",
-        default=default_device,
-        help=f"Serial device name. Default={default_device}",
+        default=Console.default_device(),
+        help=f"Serial device name. Default={Console.default_device()}",
     )
     parser.add_argument(
         "-t",
@@ -609,13 +610,8 @@ def exec_args():
     args.reset = str_to_address(parser, args.reset, "-r/--reset")
     args.irq = str_to_address(parser, args.irq, "-i/--irq")
 
-    # python3 rp6502.py run
-    if args.command == "run":
-        print(f"[{os.path.basename(__file__)}] Loading ROM {args.filename[0]}")
-        rom = ROM()
-        rom.add_rp6502_file(args.filename[0])
-        if args.reset != None:
-            rom.add_reset_vector(args.reset)
+    # Open console and extend error with a hint about the config file
+    if args.command in ["run", "upload", "basic"]:
         print(f"[{os.path.basename(__file__)}] Opening device {args.device}")
         try:
             console = Console(args.device)
@@ -627,6 +623,14 @@ def exec_args():
             else:
                 raise
         console.send_break()
+
+    # python3 rp6502.py run
+    if args.command == "run":
+        print(f"[{os.path.basename(__file__)}] Loading ROM {args.filename[0]}")
+        rom = ROM()
+        rom.add_rp6502_file(args.filename[0])
+        if args.reset != None:
+            rom.add_reset_vector(args.reset)
         print(f"[{os.path.basename(__file__)}] Sending ROM")
         console.send_rom(rom)
         if args.term:
@@ -640,10 +644,6 @@ def exec_args():
 
     # python3 rp6502.py upload
     if args.command == "upload":
-        print(f"[{os.path.basename(__file__)}] Opening device {args.device}")
-        console = Console(args.device)
-        if len(args.filename) > 0:
-            console.send_break()
         for file in args.filename:
             print(f"[{os.path.basename(__file__)}] Uploading {file}")
             with open(file, "rb") as f:
@@ -652,6 +652,30 @@ def exec_args():
                 else:
                     dest = os.path.basename(file)
                 console.upload(f, dest)
+
+    # python3 rp6502.py basic
+    if args.command == "basic":
+        code_page = console.code_page()
+        print(f"[{os.path.basename(__file__)}] Starting BASIC")
+        console.serial.write(b"BASIC\r")
+        console.wait_for_prompt("READY\r\n")
+        print(f"[{os.path.basename(__file__)}] Uploading program")
+        with open(args.filename[0], "r", encoding="utf-8") as f:
+            for line_num, line in enumerate(f):
+                # Wait the perfect amount of time it takes to parse the line
+                # by waiting for a character to echo, then deleting it.
+                console.serial.write(b"0")
+                echo = console.serial.read(1)
+                console.serial.write(b"\b")
+                if echo != b"0":
+                    msg = console.serial.read_until(b"\r\n").decode("ascii").strip()
+                    raise RuntimeError(f"Line {line_num}: {msg}")
+                console.serial.write(line.encode(code_page) + b"\r")
+                console.serial.read_until(b"\r\n")
+        print(f"[{os.path.basename(__file__)}] Running program")
+        console.serial.write(b"RUN\r")
+        if args.term:
+            console.terminal(code_page)
 
     # python3 rp6502.py create
     if args.command == "create":
