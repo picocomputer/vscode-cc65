@@ -57,7 +57,7 @@ class Console:
         self.serial.write(b"set cp\r")
         self.wait_for_prompt(":", timeout)
         result = self.serial.read_until().decode("ascii")
-        return f"cp{re.sub(r"[^0-9]", "", result)}"
+        return f"cp{re.sub(r'[^0-9]', '', result)}"
 
     def terminal(self, cp):
         """Dispatch to the correct terminal emulator"""
@@ -338,7 +338,7 @@ class Console:
                 monitor_result = data.decode("ascii")
                 monitor_result += self.serial.read_until().decode("ascii").strip()
                 raise RuntimeError(monitor_result)
-            if data.lower() == prompt_bytes.lower():
+            if data.strip().lower() == prompt_bytes.lower():
                 break
             if len(data) == 0:
                 if time.monotonic() - start > timeout:
@@ -437,7 +437,7 @@ class ROM:
             # Decode first line as cp850 because binary garbage can
             # raise here before our better message gets to the user.
             command = f.readline().decode("cp850")
-            if not re.match(r"^#![Rr][Pp]6502(\r|)\n$", command):
+            if not re.match(r"^#![Rr][Pp]6502\r?\n$", command):
                 raise RuntimeError(f"Invalid RP6502 ROM file: {file}")
             while True:
                 command = f.readline().decode("ascii").rstrip()
@@ -580,7 +580,8 @@ def exec_args():
         config = configparser.ConfigParser()
         if not os.path.exists(args.config):
             config["RP6502"] = {"device": args.device, "term": args.term}
-            config.write(open(args.config, "w"))
+            with open(args.config, "w") as cfg:
+                config.write(cfg)
         else:
             config.read(args.config)
         if config.has_section("RP6502"):
@@ -599,7 +600,7 @@ def exec_args():
         if str:
             str = re.sub("^\\$", "0x", str)
             if re.match("^(0x|)[0-9A-Fa-f]*$", str):
-                return eval(str)
+                return int(str, 0)
             elif str.lower() == "file":
                 return True
             else:
