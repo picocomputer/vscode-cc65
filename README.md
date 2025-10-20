@@ -9,7 +9,7 @@ the one you aren't using.
  * [VSCode](https://code.visualstudio.com/) - This has its own installer.
  * A source build of [CC65](https://cc65.github.io/getting-started.html).
  * The following tools installed from your package managers:
-    * `sudo apt-get install cmake python3 pip git build-essential`
+    * `sudo apt install cmake python3 pip git build-essential`
     * `pip install pyserial`
 
 ### Windows Tools Install:
@@ -18,7 +18,7 @@ the one you aren't using.
  * `winget install -e --id Kitware.CMake`
  * `winget install -e --id GnuWin32.Make`
     Add `C:\Program Files (x86)\GnuWin32\bin` to your PATH.
- * A source build of [CC65](https://cc65.github.io/getting-started.html) -
+ * The current snapshot of [CC65](https://cc65.github.io/getting-started.html) -
    Do not skip the step about adding the `bin` directory to your PATH.
  * Install Python by typing `python3` in a command prompt, which will launch
    the Microsoft Store where you can start the installation. If Python runs,

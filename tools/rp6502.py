@@ -38,7 +38,7 @@ class Console:
         if platform.system() == "Windows":
             return "COM1"
         elif platform.system() == "Darwin":
-            return "/dev/tty.usbmodem"
+            return "/dev/cu.usbmodem"
         elif platform.system() == "Linux":
             return "/dev/ttyACM0"
         else:
@@ -280,7 +280,7 @@ class Console:
             return
         except TimeoutError as te:
             if retries <= 0:
-                raise te
+                raise
         self.send_break(duration, retries - 1)
 
     def command(self, cmd: str, timeout: float = DEFAULT_TIMEOUT):
@@ -618,9 +618,8 @@ def exec_args():
             console = Console(args.device)
         except serial.SerialException as se:
             if args.config and se.errno == 2:
-                look_in_config_hint = f"Verify device config in {args.config}"
-                print(f"[{os.path.basename(__file__)}] {look_in_config_hint}")
-                raise RuntimeError(look_in_config_hint) from se
+                error_msg = f"Using device config in {args.config}\n{str(se)}"
+                raise serial.SerialException(error_msg) from se
             else:
                 raise
         console.send_break()
@@ -718,7 +717,18 @@ def exec_args():
 #   import importlib
 #   rp6502 = importlib.import_module("tools.rp6502")
 if __name__ == "__main__":
-    # VSCode SIGKILLs the terminal in raw mode, reset to cooked mode
+    # VSCode SIGKILLs the terminal while in raw mode, return to cooked mode.
     if "tty" in globals():
         os.system("stty sane")
-    exec_args()
+    # Catch the two most common failures when using from VSCode so that a
+    # terminal message is displayed instead of triggering the Python debugger.
+    try:
+        exec_args()
+    except serial.SerialException as se:
+        print(f"[{os.path.basename(__file__)}] {str(se)}")
+    except FileNotFoundError as fe:
+        error_msg = str(fe)
+        if re.search(r"\$\{[^}]*\}\.rp6502", error_msg):
+            print(f"[{os.path.basename(__file__)}] Build may have failed.\n{error_msg}")
+        else:
+            raise
