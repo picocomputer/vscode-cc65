@@ -1,10 +1,23 @@
-# CMake Toolchain file for the RP6502 SDK.
+# CMake Toolchain file for cc65.
 
+# Find the executables we'll be using.
 set(CMAKE_SYSTEM_NAME Generic)
 find_program(CMAKE_C_COMPILER cl65)
 find_program(CMAKE_ASM_COMPILER cl65)
 find_program(CMAKE_LINKER ld65)
 find_program(CMAKE_AR ar65)
+
+# Add system include dir for analysis tools like IntelliSense.
+execute_process(
+    COMMAND ${CMAKE_C_COMPILER} --print-target-path
+    OUTPUT_VARIABLE CC65_SYSTEM_INCLUDE_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+cmake_path(APPEND CC65_SYSTEM_INCLUDE_DIR ".." "include")
+cmake_path(ABSOLUTE_PATH CC65_SYSTEM_INCLUDE_DIR)
+include_directories(BEFORE SYSTEM ${CC65_SYSTEM_INCLUDE_DIR})
+
+# Override CMake internals to work with cc65.
 set(CMAKE_C_COMPILE_OBJECT "<CMAKE_C_COMPILER> <DEFINES> <INCLUDES> <FLAGS> -o <OBJECT> --add-source -l <OBJECT>.s -c <SOURCE>")
 set(CMAKE_C_CREATE_STATIC_LIBRARY "<CMAKE_AR> a <TARGET> <LINK_FLAGS> <OBJECTS>")
 set(CMAKE_C_FLAGS "--target rp6502")
