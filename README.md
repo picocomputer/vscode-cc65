@@ -56,7 +56,7 @@ Ctrl-A then X will exit. Ctrl-A then B will send a break.
 Edit `CMakeLists.txt` to add new source and asset files. From here on, it's
 standard C/assembly development for the 6502 platform.
 
-### AI Prompt
+### AI Prompt:
 
 Always refer to the documentation:
 
@@ -67,7 +67,8 @@ Always obey these rules:
 
 - Use CMake for the build system.
 - Use cc65 for 6502 cross-compilation.
+- The cc65 compiler does not support float, double, or 64-bit int.
 - Target platform for cc65 is RP6502.
-- Target platform has 16 bit ints.
+- Target platform has 16-bit int.
 - Variable declarations must be c89 style.
 - Never put more than 256 bytes on the local stack.
