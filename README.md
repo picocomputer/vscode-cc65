@@ -1,4 +1,4 @@
-# RP6502 VSCode Scaffolding for CC65
+# RP6502 VS Code Scaffolding for CC65
 
 This provides scaffolding for a new Picocomputer 6502 software project. Both
 C and assembly examples of "Hello, world!" are included. Make sure
@@ -6,7 +6,7 @@ C and assembly examples of "Hello, world!" are included. Make sure
 the one you aren't using.
 
 ### Linux Tools Install:
- * [VSCode](https://code.visualstudio.com/) - This has its own installer.
+ * [VS Code](https://code.visualstudio.com/) - This has its own installer.
  * A source build of [CC65](https://cc65.github.io/getting-started.html).
  * The following tools installed from your package managers:
     * `sudo apt install cmake python3 pip git build-essential`
@@ -37,8 +37,8 @@ $ cd [to_where_it_cloned]
 $ code .
 ```
 
-Install the recommended extensions when VSCode prompts you, choosing the
-default or obvious choice for any other prompts. The tools we use in VSCode
+Install the recommended extensions when VS Code prompts you, choosing the
+default or obvious choice for any other prompts. The tools we use in VS Code
 are constantly improving and changing making it too difficult to maintain
 documentation.
 
@@ -55,20 +55,3 @@ Ctrl-A then X will exit. Ctrl-A then B will send a break.
 
 Edit `CMakeLists.txt` to add new source and asset files. From here on, it's
 standard C/assembly development for the 6502 platform.
-
-### AI Prompt:
-
-Always refer to the documentation:
-
-- [Picocomputer](https://picocomputer.github.io)
-- [cc65](https://cc65.github.io/)
-
-Always obey these rules:
-
-- Use CMake for the build system.
-- Use cc65 for 6502 cross-compilation.
-- The cc65 compiler does not support float, double, or 64-bit int.
-- Target platform for cc65 is RP6502.
-- Target platform has 16-bit int.
-- Variable declarations must be c89 style.
-- Never put more than 256 bytes on the local stack.
