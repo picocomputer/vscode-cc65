@@ -85,7 +85,8 @@ class Console:
                     ctrl_a_pressed = False
                 elif ctrl_a_pressed and char.lower() in "xq":
                     sys.stdout.write("\r\n")
-                    os.system("stty sane")
+                    if sys.stdin.isatty():
+                        os.system("stty sane")
                     break
                 else:
                     ctrl_a_pressed = False
@@ -718,7 +719,7 @@ def exec_args():
 #   rp6502 = importlib.import_module("tools.rp6502")
 if __name__ == "__main__":
     # VSCode SIGKILLs the terminal while in raw mode, return to cooked mode.
-    if "tty" in globals():
+    if "tty" in globals() and sys.stdin.isatty():
         os.system("stty sane")
     # Catch the two most common failures when using from VSCode so that a
     # terminal message is displayed instead of triggering the Python debugger.
