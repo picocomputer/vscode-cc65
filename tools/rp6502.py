@@ -618,7 +618,8 @@ def exec_args():
         try:
             console = Console(args.device)
         except serial.SerialException as se:
-            if args.config and se.errno == 2:
+            # On Windows, se.errno is None; on Unix it's 2 when serial port not found.
+            if args.config and ("FileNotFoundError" in str(se) or se.errno == 2):
                 error_msg = f"Using device config in {args.config}\n{str(se)}"
                 raise serial.SerialException(error_msg) from se
             else:

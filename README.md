@@ -42,14 +42,14 @@ default or obvious choice for any other prompts. The tools we use in VS Code
 are constantly improving and changing making it too difficult to maintain
 documentation.
 
-"Start Debugging" (F5) will build your project and upload it to the
-Picocomputer over a USB cable plugged into the RP6502 VGA USB port.
+"Start Debugging" (F5) will build your project and run it on a Picocomputer.
+Connect with a USB cable plugged into the RP6502-VGA USB port.
 
 If you get a Python error about the communications device not being found,
 edit `.rp6502` in the project root. This file will be created the first time
 you "Start Debugging" and will be ignored by git.
 
-Once the upload is complete, a debug console becomes available on the terminal
+Once the program is running, a debug console becomes available on the terminal
 tab. It will say "Python Debug Console" because the rp6502.py tool is Python.
 Ctrl-A then X will exit. Ctrl-A then B will send a break.
 
