@@ -1,5 +1,4 @@
-# Wrapper to filter out arguments that cc65 doesn't support.
-# This enables passing extra arguments to IntelliSense.
+# Filter out arguments that should only go to IntelliSense.
 # Errors and warnings adjusted for standard problem matcher.
 
 # Args 0-3 are the cmake call to this script.
@@ -15,14 +14,13 @@ endif()
 
 # Remove -include and its argument.
 set(FILTERED_ARGS "")
-set(SKIP_NEXT FALSE)
 foreach(INDEX RANGE 5 ${CMAKE_ARGC})
     if(DEFINED CMAKE_ARGV${INDEX})
         set(ARG "${CMAKE_ARGV${INDEX}}")
-        if(SKIP_NEXT)
-            set(SKIP_NEXT FALSE)
-        elseif(ARG STREQUAL "-include")
-            set(SKIP_NEXT TRUE)
+        if(ARG STREQUAL "-D__fastcall__=")
+            # skip
+        elseif(ARG STREQUAL "-D__cdecl__=")
+            # skip
         else()
             list(APPEND FILTERED_ARGS "${ARG}")
         endif()
