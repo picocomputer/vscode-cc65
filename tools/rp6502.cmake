@@ -8,22 +8,22 @@ find_program(CMAKE_C_COMPILER cl65 REQUIRED)
 find_program(CMAKE_ASM_COMPILER cl65 REQUIRED)
 find_program(CMAKE_LINKER ld65 REQUIRED)
 find_program(CMAKE_AR ar65 REQUIRED)
+set(CC65_C_COMPILER "${CMAKE_C_COMPILER}" CACHE FILEPATH "Real cc65 C compiler")
 
 # Add system include dir for analysis tools like IntelliSense.
 execute_process(
-    COMMAND ${CMAKE_C_COMPILER} --print-target-path
+    COMMAND ${CC65_C_COMPILER} --print-target-path
     OUTPUT_VARIABLE CC65_SYSTEM_INCLUDE_DIR
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 cmake_path(APPEND CC65_SYSTEM_INCLUDE_DIR ".." "include")
-cmake_path(ABSOLUTE_PATH CC65_SYSTEM_INCLUDE_DIR)
+cmake_path(ABSOLUTE_PATH CC65_SYSTEM_INCLUDE_DIR NORMALIZE)
 include_directories(BEFORE SYSTEM ${CC65_SYSTEM_INCLUDE_DIR})
 
 # Evil hack to get IntelliSense and problem matchers working by wrapping cl65.
 # Comment out these lines to completely disable hack.
 add_compile_options("$<$<COMPILE_LANGUAGE:C>:SHELL:-D__fastcall__=>")
 add_compile_options("$<$<COMPILE_LANGUAGE:C>:SHELL:-D__cdecl__=>")
-set(CC65_C_COMPILER "${CMAKE_C_COMPILER}" CACHE FILEPATH "Real cc65 C compiler")
 set(CMAKE_C_COMPILER ${CMAKE_COMMAND})
 set(CMAKE_C_COMPILER_ARG1 "-P ${CMAKE_CURRENT_LIST_DIR}/cc65_wrapper.cmake -- ${CC65_C_COMPILER}")
 set(CC65_ASM_COMPILER "${CMAKE_ASM_COMPILER}" CACHE FILEPATH "Real cc65 ASM compiler")
