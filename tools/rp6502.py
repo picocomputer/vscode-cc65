@@ -330,15 +330,21 @@ class Console:
         """Wait for a specific prompt from the device."""
         prompt_bytes = bytes(prompt, "ascii")
         start = time.monotonic()
+        at_line_start = True
         while True:
             if len(prompt) == 1:
                 data = self.serial.read()
+                if at_line_start and data == b"?":
+                    monitor_result = data.decode("ascii")
+                    monitor_result += self.serial.read_until().decode("ascii").strip()
+                    raise RuntimeError(monitor_result)
+                at_line_start = (data == b"\n" or data == b"\r")
             else:
                 data = self.serial.read_until()
-            if data.startswith(b"?"):
-                monitor_result = data.decode("ascii")
-                monitor_result += self.serial.read_until().decode("ascii").strip()
-                raise RuntimeError(monitor_result)
+                if data.startswith(b"?"):
+                    monitor_result = data.decode("ascii")
+                    monitor_result += self.serial.read_until().decode("ascii").strip()
+                    raise RuntimeError(monitor_result)
             if data.strip().lower() == prompt_bytes.lower():
                 break
             if len(data) == 0:
