@@ -27,7 +27,6 @@ try:
 except ImportError:
     pass
 
-
 # Windows
 try:
     kernel32 = ctypes.windll.kernel32
@@ -102,6 +101,7 @@ class SerialPort:
         )
         if self._handle in (-1, 0):
             raise FileNotFoundError(f"No such device: '{self._port}'")
+
         # Configure DCB (Device Control Block)
         class DCB(ctypes.Structure):
             _fields_ = [
@@ -134,6 +134,7 @@ class SerialPort:
                 ("EvtChar", ctypes.c_char),
                 ("wReserved1", wintypes.WORD),
             ]
+
         dcb = DCB()
         dcb.DCBlength = ctypes.sizeof(DCB)
         if not kernel32.GetCommState(self._handle, ctypes.byref(dcb)):
@@ -153,6 +154,7 @@ class SerialPort:
         if not kernel32.SetCommState(self._handle, ctypes.byref(dcb)):
             kernel32.CloseHandle(self._handle)
             raise SerialPortException(f"Could not set COM state for {self._port}")
+
         # Configure read/write timeouts
         class COMMTIMEOUTS(ctypes.Structure):
             _fields_ = [
@@ -162,6 +164,7 @@ class SerialPort:
                 ("WriteTotalTimeoutMultiplier", wintypes.DWORD),
                 ("WriteTotalTimeoutConstant", wintypes.DWORD),
             ]
+
         timeouts = COMMTIMEOUTS()
         timeouts.ReadIntervalTimeout = 0
         timeouts.ReadTotalTimeoutMultiplier = 0

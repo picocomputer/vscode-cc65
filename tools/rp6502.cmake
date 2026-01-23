@@ -25,10 +25,10 @@ include_directories(BEFORE SYSTEM ${CC65_SYSTEM_INCLUDE_DIR})
 add_compile_options("$<$<COMPILE_LANGUAGE:C>:SHELL:-D__fastcall__=>")
 add_compile_options("$<$<COMPILE_LANGUAGE:C>:SHELL:-D__cdecl__=>")
 set(CMAKE_C_COMPILER ${CMAKE_COMMAND})
-set(CMAKE_C_COMPILER_ARG1 "-P ${CMAKE_CURRENT_LIST_DIR}/cc65_wrapper.cmake -- ${CC65_C_COMPILER}")
+set(CMAKE_C_COMPILER_ARG1 "-P ${CMAKE_CURRENT_LIST_DIR}/cc65.cmake -- ${CC65_C_COMPILER}")
 set(CC65_ASM_COMPILER "${CMAKE_ASM_COMPILER}" CACHE FILEPATH "Real cc65 ASM compiler")
 set(CMAKE_ASM_COMPILER ${CMAKE_COMMAND})
-set(CMAKE_ASM_COMPILER_ARG1 "-P ${CMAKE_CURRENT_LIST_DIR}/cc65_wrapper.cmake -- ${CC65_ASM_COMPILER}")
+set(CMAKE_ASM_COMPILER_ARG1 "-P ${CMAKE_CURRENT_LIST_DIR}/cc65.cmake -- ${CC65_ASM_COMPILER}")
 
 # Override CMake internals to work with cc65.
 set(CMAKE_SYSTEM_NAME Generic)
