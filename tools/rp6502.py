@@ -95,19 +95,13 @@ class SerialPort:
             if not self._port.startswith("\\\\.\\")
             else self._port
         )
+        GENERIC_READ_WRITE = 0xC0000000
+        OPEN_EXISTING = 3
         self._handle = kernel32.CreateFileW(
-            port_name,
-            0xC0000000,  # GENERIC_READ | GENERIC_WRITE
-            0,  # No sharing
-            None,  # No security
-            3,  # OPEN_EXISTING
-            0,  # FILE_ATTRIBUTE_NORMAL
-            None,
+            port_name, GENERIC_READ_WRITE, 0, None, OPEN_EXISTING, 0, None
         )
-
-        if self._handle == -1 or self._handle == 0:
-            raise SerialPortException(f"Could not open port {self._port}")
-
+        if self._handle in (-1, 0):
+            raise FileNotFoundError(f"No such device: '{self._port}'")
         # Configure DCB (Device Control Block)
         class DCB(ctypes.Structure):
             _fields_ = [
@@ -140,26 +134,26 @@ class SerialPort:
                 ("EvtChar", ctypes.c_char),
                 ("wReserved1", wintypes.WORD),
             ]
-
         dcb = DCB()
         dcb.DCBlength = ctypes.sizeof(DCB)
-
         if not kernel32.GetCommState(self._handle, ctypes.byref(dcb)):
             kernel32.CloseHandle(self._handle)
             raise SerialPortException(f"Could not get COM state for {self._port}")
-
+        # Set 8N1 format with DTR/RTS enabled
         dcb.BaudRate = self._baudrate
         dcb.ByteSize = 8
-        dcb.Parity = 0  # NOPARITY
-        dcb.StopBits = 0  # ONESTOPBIT
+        dcb.Parity = 0
+        dcb.StopBits = 0
         dcb.fBinary = 1
         dcb.fParity = 0
-
+        dcb.fDtrControl = 1
+        dcb.fRtsControl = 1
+        dcb.fOutxCtsFlow = 0
+        dcb.fOutxDsrFlow = 0
         if not kernel32.SetCommState(self._handle, ctypes.byref(dcb)):
             kernel32.CloseHandle(self._handle)
             raise SerialPortException(f"Could not set COM state for {self._port}")
-
-        # Configure timeouts
+        # Configure read/write timeouts
         class COMMTIMEOUTS(ctypes.Structure):
             _fields_ = [
                 ("ReadIntervalTimeout", wintypes.DWORD),
@@ -168,14 +162,12 @@ class SerialPort:
                 ("WriteTotalTimeoutMultiplier", wintypes.DWORD),
                 ("WriteTotalTimeoutConstant", wintypes.DWORD),
             ]
-
         timeouts = COMMTIMEOUTS()
         timeouts.ReadIntervalTimeout = 0
         timeouts.ReadTotalTimeoutMultiplier = 0
-        timeouts.ReadTotalTimeoutConstant = 2000
+        timeouts.ReadTotalTimeoutConstant = 1
         timeouts.WriteTotalTimeoutMultiplier = 0
-        timeouts.WriteTotalTimeoutConstant = 1000
-
+        timeouts.WriteTotalTimeoutConstant = 0
         if not kernel32.SetCommTimeouts(self._handle, ctypes.byref(timeouts)):
             kernel32.CloseHandle(self._handle)
             raise SerialPortException(f"Could not set timeouts for {self._port}")
@@ -189,8 +181,9 @@ class SerialPort:
                 total_written += written
         else:
             written = wintypes.DWORD()
+            buffer = ctypes.create_string_buffer(bytes(data))
             if not kernel32.WriteFile(
-                self._handle, data, len(data), ctypes.byref(written), None
+                self._handle, buffer, len(data), ctypes.byref(written), None
             ):
                 raise SerialPortException("kernel32.WriteFile failed")
 
@@ -223,28 +216,21 @@ class SerialPort:
         """Read with timeout on Windows."""
         buffer = ctypes.create_string_buffer(size)
         bytes_read = wintypes.DWORD()
-        if kernel32.ReadFile(
+        success = kernel32.ReadFile(
             self._handle, buffer, size, ctypes.byref(bytes_read), None
-        ):
-            return buffer.raw[: bytes_read.value]
-        else:
-            return b""
+        )
+        return buffer.raw[: bytes_read.value] if success else b""
 
     def read_until(self, delimiter: bytes = b"\n") -> bytes:
         """Read until delimiter is found or timeout occurs."""
         start = time.monotonic()
         buffer = b""
         while True:
-            pos = buffer.find(delimiter)
-            if pos != -1:
-                result = buffer[: pos + len(delimiter)]
-                return result
+            if delimiter in buffer:
+                return buffer
             if time.monotonic() - start > RESPONSE_TIMEOUT:
                 return buffer
-            if self._is_posix:
-                chunk = self._read_posix(1)
-            else:
-                chunk = self._read_windows(1)
+            chunk = self.read(1)
             if chunk:
                 buffer += chunk
             else:
@@ -268,10 +254,10 @@ class SerialPort:
                 fcntl.ioctl(self._fd, 0x5428)  # TIOCCBRK
         else:
             try:
-                kernel32.EscapeCommFunction(self._handle, 8)
+                kernel32.EscapeCommFunction(self._handle, 8)  # SETBREAK
                 time.sleep(duration)
             finally:
-                kernel32.EscapeCommFunction(self._handle, 9)
+                kernel32.EscapeCommFunction(self._handle, 9)  # CLRBREAK
 
     def fileno(self) -> int:
         """Return the file descriptor (POSIX only, for select())."""
@@ -285,7 +271,7 @@ class SerialPort:
             os.close(self._fd)
             self._fd = None
         elif not self._is_posix and self._handle is not None:
-            ctypes.windll.kernel32.CloseHandle(self._handle)
+            kernel32.CloseHandle(self._handle)
             self._handle = None
 
 
@@ -973,8 +959,6 @@ if __name__ == "__main__":
     # terminal message is displayed instead of triggering the Python debugger.
     try:
         exec_args()
-    except SerialPortException as se:
-        print(f"[{os.path.basename(__file__)}] {str(se)}")
     except FileNotFoundError as fe:
         error_msg = str(fe)
         if re.search(r"\$\{[^}]*\}\.rp6502", error_msg):
