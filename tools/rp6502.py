@@ -35,6 +35,9 @@ try:
 except (ImportError, AttributeError):
     pass
 
+RESPONSE_TIMEOUT = 2.0
+UART_BAUDRATE = 115200
+
 
 class SerialPortException(Exception):
     """Custom exception for serial port errors."""
@@ -43,34 +46,12 @@ class SerialPortException(Exception):
 class SerialPort:
     """Cross-platform serial port implementation using standard library."""
 
-    def __init__(self):
-        self._port = None
-        self._baudrate = None
-        self._timeout = None
+    def __init__(self, port: str, baudrate: int):
+        self._port = port
+        self._baudrate = baudrate
         self._fd = None
         self._handle = None
         self._is_posix = "tty" in globals()
-        self._read_buffer = b""
-
-    def setPort(self, port: str):
-        """Set the port name."""
-        self._port = port
-
-    @property
-    def timeout(self):
-        return self._timeout
-
-    @timeout.setter
-    def timeout(self, value: float):
-        self._timeout = value
-
-    @property
-    def baudrate(self):
-        return self._baudrate
-
-    @baudrate.setter
-    def baudrate(self, value: int):
-        self._baudrate = value
 
     def open(self):
         """Open the serial port."""
@@ -81,11 +62,7 @@ class SerialPort:
 
     def _open_posix(self):
         """Open serial port on POSIX systems (Linux, macOS, BSD)."""
-        try:
-            self._fd = os.open(self._port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
-        except OSError as e:
-            raise SerialPortException(f"Could not open port {self._port}: {e}")
-
+        self._fd = os.open(self._port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
         # Configure termios
         try:
             attrs = termios.tcgetattr(self._fd)
@@ -93,25 +70,22 @@ class SerialPort:
             baud_constant = getattr(termios, f"B{self._baudrate}", None)
             if baud_constant is None:
                 raise SerialPortException(f"Unsupported baud rate: {self._baudrate}")
-            # Input baud rate
-            attrs[4] = baud_constant
-            # Output baud rate
-            attrs[5] = baud_constant
-            # Control flags: 8N1, enable receiver, no modem control
-            attrs[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
-            # Local flags: raw mode
-            attrs[3] = 0
-            # Input flags: no processing
-            attrs[0] = 0
-            # Output flags: no processing
-            attrs[1] = 0
-            # Set attributes
-            termios.tcsetattr(self._fd, termios.TCSANOW, attrs)
+            attrs[0] = 0  # Input flags: no processing
+            attrs[1] = 0  # Output flags: no processing
+            attrs[2] = (
+                termios.CS8  # 8 data bits, no parity, 1 stop bit
+                | termios.CREAD  # Enable receiver
+                | termios.CLOCAL  # No modem control
+            )
+            attrs[3] = 0  # Local flags: raw mode
+            attrs[4] = baud_constant  # Input baud rate
+            attrs[5] = baud_constant  # Output baud rate
+            termios.tcsetattr(self._fd, termios.TCSANOW, attrs)  # Set attributes
             termios.tcflush(self._fd, termios.TCIOFLUSH)
-        except Exception as e:
+        except:
             os.close(self._fd)
             self._fd = None
-            raise SerialPortException(f"Could not configure port {self._port}: {e}")
+            raise
 
     def _open_windows(self):
         """Open serial port on Windows."""
@@ -198,9 +172,7 @@ class SerialPort:
         timeouts = COMMTIMEOUTS()
         timeouts.ReadIntervalTimeout = 0
         timeouts.ReadTotalTimeoutMultiplier = 0
-        timeouts.ReadTotalTimeoutConstant = (
-            int(self._timeout * 1000) if self._timeout else 2000
-        )
+        timeouts.ReadTotalTimeoutConstant = 2000
         timeouts.WriteTotalTimeoutMultiplier = 0
         timeouts.WriteTotalTimeoutConstant = 1000
 
@@ -211,19 +183,16 @@ class SerialPort:
     def write(self, data: bytes):
         """Write data to the serial port."""
         if self._is_posix:
-            try:
-                total_written = 0
-                while total_written < len(data):
-                    written = os.write(self._fd, data[total_written:])
-                    total_written += written
-            except OSError as e:
-                raise SerialPortException(f"Write failed: {e}")
+            total_written = 0
+            while total_written < len(data):
+                written = os.write(self._fd, data[total_written:])
+                total_written += written
         else:
             written = wintypes.DWORD()
             if not kernel32.WriteFile(
                 self._handle, data, len(data), ctypes.byref(written), None
             ):
-                raise SerialPortException("Write failed")
+                raise SerialPortException("kernel32.WriteFile failed")
 
     def read(self, size: int = 1) -> bytes:
         """Read up to size bytes from the serial port."""
@@ -236,35 +205,24 @@ class SerialPort:
         """Read with timeout on POSIX systems."""
         start = time.monotonic()
         data = b""
-
         while len(data) < size:
-            if self._timeout and (time.monotonic() - start) > self._timeout:
+            if time.monotonic() - start > RESPONSE_TIMEOUT:
                 break
-
             try:
                 chunk = os.read(self._fd, size - len(data))
                 if chunk:
                     data += chunk
-                    start = time.monotonic()  # Reset timeout on successful read
+                    start = time.monotonic()
                 else:
-                    if self.in_waiting == 0:
-                        time.sleep(0.001)
+                    time.sleep(0.001)
             except BlockingIOError:
-                if self.in_waiting == 0:
-                    time.sleep(0.001)
-            except OSError as e:
-                if e.errno != 11:  # EAGAIN
-                    raise SerialPortException(f"Read failed: {e}")
-                if self.in_waiting == 0:
-                    time.sleep(0.001)
-
+                time.sleep(0.001)
         return data
 
     def _read_windows(self, size: int) -> bytes:
         """Read with timeout on Windows."""
         buffer = ctypes.create_string_buffer(size)
         bytes_read = wintypes.DWORD()
-
         if kernel32.ReadFile(
             self._handle, buffer, size, ctypes.byref(bytes_read), None
         ):
@@ -275,92 +233,45 @@ class SerialPort:
     def read_until(self, delimiter: bytes = b"\n") -> bytes:
         """Read until delimiter is found or timeout occurs."""
         start = time.monotonic()
-
+        buffer = b""
         while True:
-            # Check if delimiter is in buffer
-            pos = self._read_buffer.find(delimiter)
+            pos = buffer.find(delimiter)
             if pos != -1:
-                result = self._read_buffer[: pos + len(delimiter)]
-                self._read_buffer = self._read_buffer[pos + len(delimiter) :]
+                result = buffer[: pos + len(delimiter)]
                 return result
-
-            # Check timeout
-            if self._timeout and (time.monotonic() - start) > self._timeout:
-                result = self._read_buffer
-                self._read_buffer = b""
-                return result
-
-            # Read more data
-            chunk = self.read(1)
-            if chunk:
-                self._read_buffer += chunk
+            if time.monotonic() - start > RESPONSE_TIMEOUT:
+                return buffer
+            if self._is_posix:
+                chunk = self._read_posix(1)
             else:
-                if self.in_waiting == 0:
-                    time.sleep(0.001)
+                chunk = self._read_windows(1)
+            if chunk:
+                buffer += chunk
+            else:
+                time.sleep(0.001)
 
-    def read_all(self) -> bytes:
-        """Read all available data from the serial port."""
-        data = self._read_buffer
-        self._read_buffer = b""
+    def flush_read_bufs(self):
+        """Discard all pending input data."""
+        if self._is_posix:
+            termios.tcflush(self._fd, termios.TCIFLUSH)
+        else:
+            kernel32.PurgeComm(self._handle, 0x0008)  # PURGE_RXCLEAR
 
-        while True:
-            waiting = self.in_waiting
-            if waiting == 0:
-                break
-            chunk = self.read(min(waiting, 4096))
-            if not chunk:
-                break
-            data += chunk
-
-        return data
-
-    def send_break(self, duration: float = 0.25):
+    def send_break(self):
         """Send a break signal."""
+        duration = 0.1  # works down to 300bps
         if self._is_posix:
             try:
-                termios.tcsendbreak(self._fd, int(duration * 10))
-            except Exception as e:
-                raise SerialPortException(f"Send break failed: {e}")
+                fcntl.ioctl(self._fd, 0x5427)  # TIOCSBRK
+                time.sleep(duration)
+            finally:
+                fcntl.ioctl(self._fd, 0x5428)  # TIOCCBRK
         else:
-            # SETBREAK = 8, CLRBREAK = 9
-            kernel32.EscapeCommFunction(self._handle, 8)
-            time.sleep(duration)
-            kernel32.EscapeCommFunction(self._handle, 9)
-
-    @property
-    def in_waiting(self) -> int:
-        """Return number of bytes available to read."""
-        if self._is_posix:
             try:
-                buf = ctypes.c_int()
-                fcntl.ioctl(self._fd, termios.FIONREAD, buf)
-                return buf.value + len(self._read_buffer)
-            except Exception:
-                return len(self._read_buffer)
-        else:
-
-            class COMSTAT(ctypes.Structure):
-                _fields_ = [
-                    ("fCtsHold", wintypes.DWORD, 1),
-                    ("fDsrHold", wintypes.DWORD, 1),
-                    ("fRlsdHold", wintypes.DWORD, 1),
-                    ("fXoffHold", wintypes.DWORD, 1),
-                    ("fXoffSent", wintypes.DWORD, 1),
-                    ("fEof", wintypes.DWORD, 1),
-                    ("fTxim", wintypes.DWORD, 1),
-                    ("fReserved", wintypes.DWORD, 25),
-                    ("cbInQue", wintypes.DWORD),
-                    ("cbOutQue", wintypes.DWORD),
-                ]
-
-            errors = wintypes.DWORD()
-            stat = COMSTAT()
-
-            if kernel32.ClearCommError(
-                self._handle, ctypes.byref(errors), ctypes.byref(stat)
-            ):
-                return stat.cbInQue + len(self._read_buffer)
-            return len(self._read_buffer)
+                kernel32.EscapeCommFunction(self._handle, 8)
+                time.sleep(duration)
+            finally:
+                kernel32.EscapeCommFunction(self._handle, 9)
 
     def fileno(self) -> int:
         """Return the file descriptor (POSIX only, for select())."""
@@ -381,9 +292,6 @@ class SerialPort:
 class Console:
     """Manages the RP6502 console over a serial connection."""
 
-    DEFAULT_TIMEOUT = 2.0
-    UART_BAUDRATE = 115200
-
     def default_device():
         # Hint at where the USB CDC mounts on various OSs
         if platform.system() == "Windows":
@@ -395,15 +303,12 @@ class Console:
         else:
             return "/dev/tty"
 
-    def __init__(self, name: str, timeout: float = DEFAULT_TIMEOUT):
+    def __init__(self, name):
         """Initialize console over serial connection."""
-        self.serial = SerialPort()
-        self.serial.setPort(name)
-        self.serial.timeout = timeout
-        self.serial.baudrate = self.UART_BAUDRATE
+        self.serial = SerialPort(name, UART_BAUDRATE)
         self.serial.open()
 
-    def code_page(self, timeout: float = DEFAULT_TIMEOUT) -> str:
+    def code_page(self, timeout: float = RESPONSE_TIMEOUT) -> str:
         """Fetch code page to use for terminal encoding"""
         self.serial.write(b"set cp\r")
         self.wait_for_prompt(":", timeout)
@@ -618,19 +523,13 @@ class Console:
             return char
         return None
 
-    def send_break(self, duration: float = 0.01, retries: int = 1):
+    def send_break(self):
         """Stop the 6502 and return to monitor."""
-        self.serial.read_all()
-        self.serial.send_break(duration)
-        try:
-            self.wait_for_prompt("]")
-            return
-        except TimeoutError as te:
-            if retries <= 0:
-                raise
-        self.send_break(duration, retries - 1)
+        self.serial.flush_read_bufs()
+        self.serial.send_break()
+        self.wait_for_prompt("]")
 
-    def command(self, cmd: str, timeout: float = DEFAULT_TIMEOUT):
+    def command(self, cmd: str, timeout: float = RESPONSE_TIMEOUT):
         """Send one command and wait for next monitor prompt."""
         self.serial.write(bytes(cmd, "ascii"))
         self.serial.write(b"\r")
@@ -672,7 +571,7 @@ class Console:
             addr += len(data)
             addr, data = rom.next_rom_data(addr)
 
-    def wait_for_prompt(self, prompt: str, timeout: float = DEFAULT_TIMEOUT):
+    def wait_for_prompt(self, prompt: str, timeout: float = RESPONSE_TIMEOUT):
         """Wait for a specific prompt from the device."""
         prompt_bytes = bytes(prompt, "ascii")
         start = time.monotonic()
@@ -966,16 +865,12 @@ def exec_args():
 
     # Open console and extend error with a hint about the config file
     if args.command in ["run", "upload", "basic"]:
+        if args.config:
+            print(
+                f"[{os.path.basename(__file__)}] Using device config in {args.config}"
+            )
         print(f"[{os.path.basename(__file__)}] Opening device {args.device}")
-        try:
-            console = Console(args.device)
-        except serial.SerialException as se:
-            # On Windows, se.errno is None; on Unix it's 2 when serial port not found.
-            if args.config and ("FileNotFoundError" in str(se) or se.errno == 2):
-                error_msg = f"Using device config in {args.config}\n{str(se)}"
-                raise serial.SerialException(error_msg) from se
-            else:
-                raise
+        console = Console(args.device)
         console.send_break()
 
     # python3 rp6502.py run
@@ -1074,15 +969,15 @@ if __name__ == "__main__":
     # VSCode SIGKILLs the terminal while in raw mode, return to cooked mode.
     if "tty" in globals() and sys.stdin.isatty():
         os.system("stty sane")
-    # Catch the two most common failures when using from VSCode so that a
+    # Catch build and serial port failures when using from VSCode so that a
     # terminal message is displayed instead of triggering the Python debugger.
     try:
         exec_args()
-    except serial.SerialException as se:
+    except SerialPortException as se:
         print(f"[{os.path.basename(__file__)}] {str(se)}")
     except FileNotFoundError as fe:
         error_msg = str(fe)
         if re.search(r"\$\{[^}]*\}\.rp6502", error_msg):
             print(f"[{os.path.basename(__file__)}] Build may have failed.\n{error_msg}")
         else:
-            raise
+            print(error_msg)
