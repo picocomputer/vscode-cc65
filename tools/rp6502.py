@@ -10,7 +10,6 @@
 import os
 import re
 import time
-import serial
 import binascii
 import argparse
 import configparser
@@ -20,17 +19,369 @@ import select
 import ctypes
 from typing import Union
 
-# Detect POSIX terminal
+# POSIX
 try:
     import tty
-except:
+    import termios
+    import fcntl
+except ImportError:
     pass
+
+
+# Windows
+try:
+    kernel32 = ctypes.windll.kernel32
+    from ctypes import wintypes
+except (ImportError, AttributeError):
+    pass
+
+
+class SerialPortException(Exception):
+    """Custom exception for serial port errors."""
+
+
+class SerialPort:
+    """Cross-platform serial port implementation using standard library."""
+
+    def __init__(self):
+        self._port = None
+        self._baudrate = None
+        self._timeout = None
+        self._fd = None
+        self._handle = None
+        self._is_posix = "tty" in globals()
+        self._read_buffer = b""
+
+    def setPort(self, port: str):
+        """Set the port name."""
+        self._port = port
+
+    @property
+    def timeout(self):
+        return self._timeout
+
+    @timeout.setter
+    def timeout(self, value: float):
+        self._timeout = value
+
+    @property
+    def baudrate(self):
+        return self._baudrate
+
+    @baudrate.setter
+    def baudrate(self, value: int):
+        self._baudrate = value
+
+    def open(self):
+        """Open the serial port."""
+        if self._is_posix:
+            self._open_posix()
+        else:
+            self._open_windows()
+
+    def _open_posix(self):
+        """Open serial port on POSIX systems (Linux, macOS, BSD)."""
+        try:
+            self._fd = os.open(self._port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+        except OSError as e:
+            raise SerialPortException(f"Could not open port {self._port}: {e}")
+
+        # Configure termios
+        try:
+            attrs = termios.tcgetattr(self._fd)
+            # Set baud rate
+            baud_constant = getattr(termios, f"B{self._baudrate}", None)
+            if baud_constant is None:
+                raise SerialPortException(f"Unsupported baud rate: {self._baudrate}")
+            # Input baud rate
+            attrs[4] = baud_constant
+            # Output baud rate
+            attrs[5] = baud_constant
+            # Control flags: 8N1, enable receiver, no modem control
+            attrs[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
+            # Local flags: raw mode
+            attrs[3] = 0
+            # Input flags: no processing
+            attrs[0] = 0
+            # Output flags: no processing
+            attrs[1] = 0
+            # Set attributes
+            termios.tcsetattr(self._fd, termios.TCSANOW, attrs)
+            termios.tcflush(self._fd, termios.TCIOFLUSH)
+        except Exception as e:
+            os.close(self._fd)
+            self._fd = None
+            raise SerialPortException(f"Could not configure port {self._port}: {e}")
+
+    def _open_windows(self):
+        """Open serial port on Windows."""
+        # Open COM port
+        port_name = (
+            f"\\\\.\\{self._port}"
+            if not self._port.startswith("\\\\.\\")
+            else self._port
+        )
+        self._handle = kernel32.CreateFileW(
+            port_name,
+            0xC0000000,  # GENERIC_READ | GENERIC_WRITE
+            0,  # No sharing
+            None,  # No security
+            3,  # OPEN_EXISTING
+            0,  # FILE_ATTRIBUTE_NORMAL
+            None,
+        )
+
+        if self._handle == -1 or self._handle == 0:
+            raise SerialPortException(f"Could not open port {self._port}")
+
+        # Configure DCB (Device Control Block)
+        class DCB(ctypes.Structure):
+            _fields_ = [
+                ("DCBlength", wintypes.DWORD),
+                ("BaudRate", wintypes.DWORD),
+                ("fBinary", wintypes.DWORD, 1),
+                ("fParity", wintypes.DWORD, 1),
+                ("fOutxCtsFlow", wintypes.DWORD, 1),
+                ("fOutxDsrFlow", wintypes.DWORD, 1),
+                ("fDtrControl", wintypes.DWORD, 2),
+                ("fDsrSensitivity", wintypes.DWORD, 1),
+                ("fTXContinueOnXoff", wintypes.DWORD, 1),
+                ("fOutX", wintypes.DWORD, 1),
+                ("fInX", wintypes.DWORD, 1),
+                ("fErrorChar", wintypes.DWORD, 1),
+                ("fNull", wintypes.DWORD, 1),
+                ("fRtsControl", wintypes.DWORD, 2),
+                ("fAbortOnError", wintypes.DWORD, 1),
+                ("fDummy2", wintypes.DWORD, 17),
+                ("wReserved", wintypes.WORD),
+                ("XonLim", wintypes.WORD),
+                ("XoffLim", wintypes.WORD),
+                ("ByteSize", ctypes.c_ubyte),
+                ("Parity", ctypes.c_ubyte),
+                ("StopBits", ctypes.c_ubyte),
+                ("XonChar", ctypes.c_char),
+                ("XoffChar", ctypes.c_char),
+                ("ErrorChar", ctypes.c_char),
+                ("EofChar", ctypes.c_char),
+                ("EvtChar", ctypes.c_char),
+                ("wReserved1", wintypes.WORD),
+            ]
+
+        dcb = DCB()
+        dcb.DCBlength = ctypes.sizeof(DCB)
+
+        if not kernel32.GetCommState(self._handle, ctypes.byref(dcb)):
+            kernel32.CloseHandle(self._handle)
+            raise SerialPortException(f"Could not get COM state for {self._port}")
+
+        dcb.BaudRate = self._baudrate
+        dcb.ByteSize = 8
+        dcb.Parity = 0  # NOPARITY
+        dcb.StopBits = 0  # ONESTOPBIT
+        dcb.fBinary = 1
+        dcb.fParity = 0
+
+        if not kernel32.SetCommState(self._handle, ctypes.byref(dcb)):
+            kernel32.CloseHandle(self._handle)
+            raise SerialPortException(f"Could not set COM state for {self._port}")
+
+        # Configure timeouts
+        class COMMTIMEOUTS(ctypes.Structure):
+            _fields_ = [
+                ("ReadIntervalTimeout", wintypes.DWORD),
+                ("ReadTotalTimeoutMultiplier", wintypes.DWORD),
+                ("ReadTotalTimeoutConstant", wintypes.DWORD),
+                ("WriteTotalTimeoutMultiplier", wintypes.DWORD),
+                ("WriteTotalTimeoutConstant", wintypes.DWORD),
+            ]
+
+        timeouts = COMMTIMEOUTS()
+        timeouts.ReadIntervalTimeout = 0
+        timeouts.ReadTotalTimeoutMultiplier = 0
+        timeouts.ReadTotalTimeoutConstant = (
+            int(self._timeout * 1000) if self._timeout else 2000
+        )
+        timeouts.WriteTotalTimeoutMultiplier = 0
+        timeouts.WriteTotalTimeoutConstant = 1000
+
+        if not kernel32.SetCommTimeouts(self._handle, ctypes.byref(timeouts)):
+            kernel32.CloseHandle(self._handle)
+            raise SerialPortException(f"Could not set timeouts for {self._port}")
+
+    def write(self, data: bytes):
+        """Write data to the serial port."""
+        if self._is_posix:
+            try:
+                total_written = 0
+                while total_written < len(data):
+                    written = os.write(self._fd, data[total_written:])
+                    total_written += written
+            except OSError as e:
+                raise SerialPortException(f"Write failed: {e}")
+        else:
+            written = wintypes.DWORD()
+            if not kernel32.WriteFile(
+                self._handle, data, len(data), ctypes.byref(written), None
+            ):
+                raise SerialPortException("Write failed")
+
+    def read(self, size: int = 1) -> bytes:
+        """Read up to size bytes from the serial port."""
+        if self._is_posix:
+            return self._read_posix(size)
+        else:
+            return self._read_windows(size)
+
+    def _read_posix(self, size: int) -> bytes:
+        """Read with timeout on POSIX systems."""
+        start = time.monotonic()
+        data = b""
+
+        while len(data) < size:
+            if self._timeout and (time.monotonic() - start) > self._timeout:
+                break
+
+            try:
+                chunk = os.read(self._fd, size - len(data))
+                if chunk:
+                    data += chunk
+                    start = time.monotonic()  # Reset timeout on successful read
+                else:
+                    if self.in_waiting == 0:
+                        time.sleep(0.001)
+            except BlockingIOError:
+                if self.in_waiting == 0:
+                    time.sleep(0.001)
+            except OSError as e:
+                if e.errno != 11:  # EAGAIN
+                    raise SerialPortException(f"Read failed: {e}")
+                if self.in_waiting == 0:
+                    time.sleep(0.001)
+
+        return data
+
+    def _read_windows(self, size: int) -> bytes:
+        """Read with timeout on Windows."""
+        buffer = ctypes.create_string_buffer(size)
+        bytes_read = wintypes.DWORD()
+
+        if kernel32.ReadFile(
+            self._handle, buffer, size, ctypes.byref(bytes_read), None
+        ):
+            return buffer.raw[: bytes_read.value]
+        else:
+            return b""
+
+    def read_until(self, delimiter: bytes = b"\n") -> bytes:
+        """Read until delimiter is found or timeout occurs."""
+        start = time.monotonic()
+
+        while True:
+            # Check if delimiter is in buffer
+            pos = self._read_buffer.find(delimiter)
+            if pos != -1:
+                result = self._read_buffer[: pos + len(delimiter)]
+                self._read_buffer = self._read_buffer[pos + len(delimiter) :]
+                return result
+
+            # Check timeout
+            if self._timeout and (time.monotonic() - start) > self._timeout:
+                result = self._read_buffer
+                self._read_buffer = b""
+                return result
+
+            # Read more data
+            chunk = self.read(1)
+            if chunk:
+                self._read_buffer += chunk
+            else:
+                if self.in_waiting == 0:
+                    time.sleep(0.001)
+
+    def read_all(self) -> bytes:
+        """Read all available data from the serial port."""
+        data = self._read_buffer
+        self._read_buffer = b""
+
+        while True:
+            waiting = self.in_waiting
+            if waiting == 0:
+                break
+            chunk = self.read(min(waiting, 4096))
+            if not chunk:
+                break
+            data += chunk
+
+        return data
+
+    def send_break(self, duration: float = 0.25):
+        """Send a break signal."""
+        if self._is_posix:
+            try:
+                termios.tcsendbreak(self._fd, int(duration * 10))
+            except Exception as e:
+                raise SerialPortException(f"Send break failed: {e}")
+        else:
+            # SETBREAK = 8, CLRBREAK = 9
+            kernel32.EscapeCommFunction(self._handle, 8)
+            time.sleep(duration)
+            kernel32.EscapeCommFunction(self._handle, 9)
+
+    @property
+    def in_waiting(self) -> int:
+        """Return number of bytes available to read."""
+        if self._is_posix:
+            try:
+                buf = ctypes.c_int()
+                fcntl.ioctl(self._fd, termios.FIONREAD, buf)
+                return buf.value + len(self._read_buffer)
+            except Exception:
+                return len(self._read_buffer)
+        else:
+
+            class COMSTAT(ctypes.Structure):
+                _fields_ = [
+                    ("fCtsHold", wintypes.DWORD, 1),
+                    ("fDsrHold", wintypes.DWORD, 1),
+                    ("fRlsdHold", wintypes.DWORD, 1),
+                    ("fXoffHold", wintypes.DWORD, 1),
+                    ("fXoffSent", wintypes.DWORD, 1),
+                    ("fEof", wintypes.DWORD, 1),
+                    ("fTxim", wintypes.DWORD, 1),
+                    ("fReserved", wintypes.DWORD, 25),
+                    ("cbInQue", wintypes.DWORD),
+                    ("cbOutQue", wintypes.DWORD),
+                ]
+
+            errors = wintypes.DWORD()
+            stat = COMSTAT()
+
+            if kernel32.ClearCommError(
+                self._handle, ctypes.byref(errors), ctypes.byref(stat)
+            ):
+                return stat.cbInQue + len(self._read_buffer)
+            return len(self._read_buffer)
+
+    def fileno(self) -> int:
+        """Return the file descriptor (POSIX only, for select())."""
+        if self._is_posix:
+            return self._fd
+        raise NotImplementedError("fileno() not supported on Windows")
+
+    def close(self):
+        """Close the serial port."""
+        if self._is_posix and self._fd is not None:
+            os.close(self._fd)
+            self._fd = None
+        elif not self._is_posix and self._handle is not None:
+            ctypes.windll.kernel32.CloseHandle(self._handle)
+            self._handle = None
 
 
 class Console:
     """Manages the RP6502 console over a serial connection."""
 
-    DEFAULT_TIMEOUT = 0.5
+    DEFAULT_TIMEOUT = 2.0
     UART_BAUDRATE = 115200
 
     def default_device():
@@ -46,7 +397,7 @@ class Console:
 
     def __init__(self, name: str, timeout: float = DEFAULT_TIMEOUT):
         """Initialize console over serial connection."""
-        self.serial = serial.Serial()
+        self.serial = SerialPort()
         self.serial.setPort(name)
         self.serial.timeout = timeout
         self.serial.baudrate = self.UART_BAUDRATE
@@ -105,41 +456,36 @@ class Console:
         ctrl_a_pressed = False
         while True:
             try:
-                if self.serial.in_waiting > 0:
-                    data = self.serial.read(1)
-                    if len(data) > 0:
-                        try:
-                            sys.stdout.write(data.decode(cp))
-                        except UnicodeDecodeError:
-                            sys.stdout.write(f"\\x{data[0]:02x}")
-                        sys.stdout.flush()
-                key_in = self.term_windows_keyboard()
-                if key_in:
-                    if key_in == "\x01":  # CTRL-A
-                        ctrl_a_pressed = True
-                        self.serial.write(key_in.encode(cp))
-                    elif ctrl_a_pressed and key_in.lower() in "bf":
-                        self.send_break()  # eats prompt
-                        sys.stdout.write("\r\n]")  # fake prompt
-                        ctrl_a_pressed = False
-                    elif ctrl_a_pressed and key_in.lower() in "xq":
-                        sys.stdout.write("\r\n")
-                        break
-                    else:
-                        ctrl_a_pressed = False
-                        self.serial.write(key_in.encode(cp))
+                data = self.serial.read(1)
+                if len(data) > 0:
+                    try:
+                        sys.stdout.write(data.decode(cp))
+                    except UnicodeDecodeError:
+                        sys.stdout.write(f"\\x{data[0]:02x}")
+                    sys.stdout.flush()
                 else:
-                    if self.serial.in_waiting == 0:
+                    key_in = self.term_windows_keyboard()
+                    if key_in:
+                        if key_in == "\x01":  # CTRL-A
+                            ctrl_a_pressed = True
+                            self.serial.write(key_in.encode(cp))
+                        elif ctrl_a_pressed and key_in.lower() in "bf":
+                            self.send_break()  # eats prompt
+                            sys.stdout.write("\r\n]")  # fake prompt
+                            ctrl_a_pressed = False
+                        elif ctrl_a_pressed and key_in.lower() in "xq":
+                            sys.stdout.write("\r\n")
+                            break
+                        else:
+                            ctrl_a_pressed = False
+                            self.serial.write(key_in.encode(cp))
+                    else:
                         time.sleep(0.001)
             except KeyboardInterrupt:
                 self.serial.write(b"\x03")
 
     def term_windows_keyboard(self) -> Union[str, None]:
         """Get a key event as ANSI using Windows Console API"""
-
-        # FFI setup
-        from ctypes import wintypes
-
         if not hasattr(self, "_stdin_handle"):
             self._stdin_handle = ctypes.windll.kernel32.GetStdHandle(-10)
 
@@ -333,12 +679,12 @@ class Console:
         at_line_start = True
         while True:
             if len(prompt) == 1:
-                data = self.serial.read()
+                data = self.serial.read(1)
                 if at_line_start and data == b"?":
                     monitor_result = data.decode("ascii")
                     monitor_result += self.serial.read_until().decode("ascii").strip()
                     raise RuntimeError(monitor_result)
-                at_line_start = (data == b"\n" or data == b"\r")
+                at_line_start = data == b"\n" or data == b"\r"
             else:
                 data = self.serial.read_until()
                 if data.startswith(b"?"):
