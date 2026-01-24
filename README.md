@@ -9,8 +9,7 @@ the one you aren't using.
  * [VS Code](https://code.visualstudio.com/) - This has its own installer.
  * A source build of [CC65](https://cc65.github.io/getting-started.html).
  * The following tools installed from your package managers:
-    * `sudo apt install cmake python3 pip git build-essential`
-    * `pip install pyserial`
+    * `sudo apt install cmake python3 git build-essential`
 
 ### Windows Tools Install:
  * `winget install -e --id Microsoft.VisualStudioCode`
@@ -22,8 +21,7 @@ the one you aren't using.
    Do not skip the step about adding the `bin` directory to your PATH.
  * Install Python by typing `python3` in a command prompt, which will launch
    the Microsoft Store where you can start the installation. If Python runs,
-   this has already been done — exit Python with Ctrl-Z plus Enter.
- * `pip install pyserial`
+   this has already been done - exit Python with Ctrl-Z plus Enter.
 
 ### Getting Started:
 Go to the [GitHub template](https://github.com/picocomputer/vscode-cc65) and

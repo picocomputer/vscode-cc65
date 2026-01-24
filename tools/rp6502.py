@@ -750,18 +750,35 @@ class ROM:
 
 def exec_args():
     # Standard library argument parser
+    class CustomFormatter(argparse.HelpFormatter):
+        def __init__(self, prog):
+            super().__init__(prog, max_help_position=27)
+
     parser = argparse.ArgumentParser(
-        description="Interface with RP6502 RIA console. Manage RP6502 ROM packaging."
+        description="Interface with RP6502 RIA console. Manage RP6502 ROM packaging.",
+        formatter_class=CustomFormatter,
     )
-    parser.add_argument(
-        "command",
-        choices=["run", "upload", "basic", "create"],
-        help="{Run} local RP6502 ROM file by sending to RP6502 RAM. "
-        "{Upload} any local files to RP6502 USB storage. "
-        "{Basic} executes a program with the installed BASIC. "
-        "{Create} RP6502 ROM file from a local binary file and additional local ROM files.",
-    )
-    parser.add_argument("filename", nargs="*", help="Local filename(s).")
+    sp = parser.add_subparsers(dest="command", required=True)
+    cmds = {
+        "term": ("Attaches to the console.", None),
+        "run": ("Run local RP6502 ROM file by sending to RP6502 RAM.", 1),
+        "upload": ("Upload local files to RP6502 USB storage.", "+"),
+        "basic": ("Executes a program with the installed BASIC.", 1),
+        "create": (
+            "Create RP6502 ROM file from a local binary file. Additional local ROM files will be merged.",
+            "+",
+        ),
+    }
+    parsers = {}
+    for cmd, (desc, nargs) in cmds.items():
+        parsers[cmd] = sp.add_parser(cmd, description=desc, help=desc)
+        if nargs:
+            parsers[cmd].add_argument(
+                "filename",
+                nargs=nargs,
+                help="Local filename." if nargs == 1 else "Local filename(s).",
+            )
+
     parser.add_argument("-o", dest="out", metavar="name", help="Output path/filename.")
     parser.add_argument(
         "-a",
@@ -799,7 +816,15 @@ def exec_args():
         help=f"Configuration file for console connection.",
     )
     parser.add_argument(
-        "-D",
+        "-t",
+        "--term",
+        dest="term",
+        metavar="bool",
+        default="True",
+        help=f"Attach to console terminal on run.",
+    )
+    parser.add_argument(
+        "-d",
         "--device",
         dest="device",
         metavar="dev",
@@ -807,12 +832,12 @@ def exec_args():
         help=f"Serial device name. Default={Console.default_device()}",
     )
     parser.add_argument(
-        "-t",
-        "--term",
-        dest="term",
-        metavar="bool",
-        default="True",
-        help=f"Enables console terminal on run.",
+        # Hidden alias anyone used to minicom -D /dev/
+        "-D",
+        dest="device",
+        metavar="dev",
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
     )
     args = parser.parse_args()
 
@@ -853,7 +878,7 @@ def exec_args():
     args.irq = str_to_address(parser, args.irq, "-i/--irq")
 
     # Open console and extend error with a hint about the config file
-    if args.command in ["run", "upload", "basic"]:
+    if args.command in ["term", "run", "upload", "basic"]:
         if args.config:
             print(
                 f"[{os.path.basename(__file__)}] Using device config in {args.config}"
@@ -861,6 +886,11 @@ def exec_args():
         print(f"[{os.path.basename(__file__)}] Opening device {args.device}")
         console = Console(args.device)
         console.send_break()
+
+    # python3 rp6502.py term
+    if args.command == "term":
+        code_page = console.code_page()
+        console.terminal(code_page)
 
     # python3 rp6502.py run
     if args.command == "run":
