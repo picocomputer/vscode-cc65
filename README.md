@@ -16,7 +16,7 @@ the one you aren't using.
  * `winget install -e --id Git.Git`
  * `winget install -e --id Kitware.CMake`
  * `winget install -e --id GnuWin32.Make`
-    Add `C:\Program Files (x86)\GnuWin32\bin` to your PATH.
+   Add `C:\Program Files (x86)\GnuWin32\bin` to your PATH.
  * The current snapshot of [CC65](https://cc65.github.io/getting-started.html) -
    Do not skip the step about adding the `bin` directory to your PATH.
  * Install Python by typing `python3` in a command prompt, which will launch

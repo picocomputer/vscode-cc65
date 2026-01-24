@@ -3,6 +3,11 @@
 
 .include "rp6502.inc"
 
+.segment "RODATA"
+
+message:
+    .byte "Hello, world!", $0D, $0A, 0
+
 .segment "CODE"
 
 ; Entry point
@@ -29,8 +34,3 @@ _init:
 _exit:
     lda #RIA_OP_EXIT
     sta RIA_OP
-
-.segment "RODATA"
-
-message:
-    .byte "Hello, world!", $0D, $0A, 0
