@@ -5,12 +5,11 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # SPDX-License-Identifier: Unlicense
 
-# Developer tool for RP6502
+# RIA Developer tool
 
 import os
 import re
 import time
-import serial
 import binascii
 import argparse
 import configparser
@@ -20,18 +19,269 @@ import select
 import ctypes
 from typing import Union
 
-# Detect POSIX terminal
+# POSIX
 try:
     import tty
-except:
+    import termios
+    import fcntl
+except ImportError:
     pass
+
+# Windows
+try:
+    kernel32 = ctypes.windll.kernel32
+    from ctypes import wintypes
+except (ImportError, AttributeError):
+    pass
+
+# Rename this file for use on other platforms.
+SCRIPT_FILE = os.path.basename(__file__)
+SCRIPT_NAME = os.path.splitext(SCRIPT_FILE)[0].upper()
+
+# Two seconds is generous but not
+# so short that it becomes suspect.
+RESPONSE_TIMEOUT = 2.0
+
+
+class SerialPort:
+    """Cross-platform serial port implementation."""
+
+    def __init__(self, port: str):
+        self._port = port
+        self._baudrate = 115200
+        self._fd = None
+        self._handle = None
+        self._is_posix = "tty" in globals()
+
+    def open(self):
+        """Open the serial port."""
+        if self._is_posix:
+            self._open_posix()
+        else:
+            self._open_windows()
+
+    def _open_posix(self):
+        """Open serial port on POSIX systems (Linux, macOS, BSD)."""
+        self._fd = os.open(self._port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+        # Configure termios
+        try:
+            attrs = termios.tcgetattr(self._fd)
+            # Set baud rate
+            baud_constant = getattr(termios, f"B{self._baudrate}", None)
+            if baud_constant is None:
+                raise OSError(f"Unsupported baud rate: {self._baudrate}")
+            attrs[0] = 0  # Input flags: no processing
+            attrs[1] = 0  # Output flags: no processing
+            attrs[2] = (
+                termios.CS8  # 8 data bits, no parity, 1 stop bit
+                | termios.CREAD  # Enable receiver
+                | termios.CLOCAL  # No modem control
+            )
+            attrs[3] = 0  # Local flags: raw mode
+            attrs[4] = baud_constant  # Input baud rate
+            attrs[5] = baud_constant  # Output baud rate
+            termios.tcsetattr(self._fd, termios.TCSANOW, attrs)  # Set attributes
+            termios.tcflush(self._fd, termios.TCIOFLUSH)
+        except:
+            os.close(self._fd)
+            self._fd = None
+            raise
+
+    def _open_windows(self):
+        """Open serial port on Windows."""
+        # Open COM port
+        port_name = (
+            f"\\\\.\\{self._port}"
+            if not self._port.startswith("\\\\.\\")
+            else self._port
+        )
+        GENERIC_READ_WRITE = 0xC0000000
+        OPEN_EXISTING = 3
+        self._handle = kernel32.CreateFileW(
+            port_name, GENERIC_READ_WRITE, 0, None, OPEN_EXISTING, 0, None
+        )
+        # Mimic POSIX error here
+        if self._handle in (-1, 0):
+            raise FileNotFoundError(f"No such device: '{self._port}'")
+
+        # Configure DCB (Device Control Block)
+        class DCB(ctypes.Structure):
+            _fields_ = [
+                ("DCBlength", wintypes.DWORD),
+                ("BaudRate", wintypes.DWORD),
+                ("fBinary", wintypes.DWORD, 1),
+                ("fParity", wintypes.DWORD, 1),
+                ("fOutxCtsFlow", wintypes.DWORD, 1),
+                ("fOutxDsrFlow", wintypes.DWORD, 1),
+                ("fDtrControl", wintypes.DWORD, 2),
+                ("fDsrSensitivity", wintypes.DWORD, 1),
+                ("fTXContinueOnXoff", wintypes.DWORD, 1),
+                ("fOutX", wintypes.DWORD, 1),
+                ("fInX", wintypes.DWORD, 1),
+                ("fErrorChar", wintypes.DWORD, 1),
+                ("fNull", wintypes.DWORD, 1),
+                ("fRtsControl", wintypes.DWORD, 2),
+                ("fAbortOnError", wintypes.DWORD, 1),
+                ("fDummy2", wintypes.DWORD, 17),
+                ("wReserved", wintypes.WORD),
+                ("XonLim", wintypes.WORD),
+                ("XoffLim", wintypes.WORD),
+                ("ByteSize", ctypes.c_ubyte),
+                ("Parity", ctypes.c_ubyte),
+                ("StopBits", ctypes.c_ubyte),
+                ("XonChar", ctypes.c_char),
+                ("XoffChar", ctypes.c_char),
+                ("ErrorChar", ctypes.c_char),
+                ("EofChar", ctypes.c_char),
+                ("EvtChar", ctypes.c_char),
+                ("wReserved1", wintypes.WORD),
+            ]
+
+        dcb = DCB()
+        dcb.DCBlength = ctypes.sizeof(DCB)
+        if not kernel32.GetCommState(self._handle, ctypes.byref(dcb)):
+            kernel32.CloseHandle(self._handle)
+            raise OSError(f"Could not get COM state for {self._port}")
+        # Set 8N1 format with DTR/RTS enabled
+        dcb.BaudRate = self._baudrate
+        dcb.ByteSize = 8
+        dcb.Parity = 0
+        dcb.StopBits = 0
+        dcb.fBinary = 1
+        dcb.fParity = 0
+        dcb.fDtrControl = 1
+        dcb.fRtsControl = 1
+        dcb.fOutxCtsFlow = 0
+        dcb.fOutxDsrFlow = 0
+        if not kernel32.SetCommState(self._handle, ctypes.byref(dcb)):
+            kernel32.CloseHandle(self._handle)
+            raise OSError(f"Could not set COM state for {self._port}")
+
+        # Configure read/write timeouts
+        class COMMTIMEOUTS(ctypes.Structure):
+            _fields_ = [
+                ("ReadIntervalTimeout", wintypes.DWORD),
+                ("ReadTotalTimeoutMultiplier", wintypes.DWORD),
+                ("ReadTotalTimeoutConstant", wintypes.DWORD),
+                ("WriteTotalTimeoutMultiplier", wintypes.DWORD),
+                ("WriteTotalTimeoutConstant", wintypes.DWORD),
+            ]
+
+        timeouts = COMMTIMEOUTS()
+        timeouts.ReadIntervalTimeout = 0
+        timeouts.ReadTotalTimeoutMultiplier = 0
+        timeouts.ReadTotalTimeoutConstant = 1
+        timeouts.WriteTotalTimeoutMultiplier = 0
+        timeouts.WriteTotalTimeoutConstant = 0
+        if not kernel32.SetCommTimeouts(self._handle, ctypes.byref(timeouts)):
+            kernel32.CloseHandle(self._handle)
+            raise OSError(f"Could not set timeouts for {self._port}")
+
+    def write(self, data: bytes):
+        """Write data to the serial port."""
+        if self._is_posix:
+            total_written = 0
+            while total_written < len(data):
+                written = os.write(self._fd, data[total_written:])
+                total_written += written
+        else:
+            written = wintypes.DWORD()
+            buffer = ctypes.create_string_buffer(bytes(data))
+            if not kernel32.WriteFile(
+                self._handle, buffer, len(data), ctypes.byref(written), None
+            ):
+                raise OSError("kernel32.WriteFile failed")
+
+    def read(self, size: int = 1) -> bytes:
+        """Read up to size bytes from the serial port."""
+        if self._is_posix:
+            return self._read_posix(size)
+        else:
+            return self._read_windows(size)
+
+    def _read_posix(self, size: int) -> bytes:
+        """Read with timeout on POSIX systems."""
+        start = time.monotonic()
+        data = b""
+        while len(data) < size:
+            if time.monotonic() - start > RESPONSE_TIMEOUT:
+                break
+            try:
+                chunk = os.read(self._fd, size - len(data))
+                if chunk:
+                    data += chunk
+                    start = time.monotonic()
+                else:
+                    time.sleep(0.001)
+            except BlockingIOError:
+                time.sleep(0.001)
+        return data
+
+    def _read_windows(self, size: int) -> bytes:
+        """Read with timeout on Windows."""
+        buffer = ctypes.create_string_buffer(size)
+        bytes_read = wintypes.DWORD()
+        success = kernel32.ReadFile(
+            self._handle, buffer, size, ctypes.byref(bytes_read), None
+        )
+        return buffer.raw[: bytes_read.value] if success else b""
+
+    def read_until(self, delimiter: bytes = b"\n") -> bytes:
+        """Read until delimiter is found or timeout occurs."""
+        start = time.monotonic()
+        buffer = b""
+        while True:
+            if delimiter in buffer:
+                return buffer
+            if time.monotonic() - start > RESPONSE_TIMEOUT:
+                return buffer
+            chunk = self.read(1)
+            if chunk:
+                buffer += chunk
+            else:
+                time.sleep(0.001)
+
+    def flush_read_bufs(self):
+        """Discard all pending input data."""
+        if self._is_posix:
+            termios.tcflush(self._fd, termios.TCIFLUSH)
+        else:
+            kernel32.PurgeComm(self._handle, 0x0008)  # PURGE_RXCLEAR
+
+    def send_break(self):
+        """Send a break signal."""
+        duration = 0.1  # works down to 300bps
+        if self._is_posix:
+            try:
+                fcntl.ioctl(self._fd, 0x5427)  # TIOCSBRK
+                time.sleep(duration)
+            finally:
+                fcntl.ioctl(self._fd, 0x5428)  # TIOCCBRK
+        else:
+            try:
+                kernel32.EscapeCommFunction(self._handle, 8)  # SETBREAK
+                time.sleep(duration)
+            finally:
+                kernel32.EscapeCommFunction(self._handle, 9)  # CLRBREAK
+
+    def fileno(self) -> int:
+        """Return the file descriptor (POSIX only, for select())."""
+        if self._is_posix:
+            return self._fd
+        raise NotImplementedError("fileno() not supported on Windows")
+
+    def close(self):
+        """Close the serial port."""
+        if self._is_posix and self._fd is not None:
+            os.close(self._fd)
+            self._fd = None
+        elif not self._is_posix and self._handle is not None:
+            kernel32.CloseHandle(self._handle)
+            self._handle = None
 
 
 class Console:
-    """Manages the RP6502 console over a serial connection."""
-
-    DEFAULT_TIMEOUT = 0.5
-    UART_BAUDRATE = 115200
+    """Manages the RIA console over a serial connection."""
 
     def default_device():
         # Hint at where the USB CDC mounts on various OSs
@@ -44,15 +294,12 @@ class Console:
         else:
             return "/dev/tty"
 
-    def __init__(self, name: str, timeout: float = DEFAULT_TIMEOUT):
+    def __init__(self, name):
         """Initialize console over serial connection."""
-        self.serial = serial.Serial()
-        self.serial.setPort(name)
-        self.serial.timeout = timeout
-        self.serial.baudrate = self.UART_BAUDRATE
+        self.serial = SerialPort(name)
         self.serial.open()
 
-    def code_page(self, timeout: float = DEFAULT_TIMEOUT) -> str:
+    def code_page(self, timeout: float = RESPONSE_TIMEOUT) -> str:
         """Fetch code page to use for terminal encoding"""
         self.serial.write(b"set cp\r")
         self.wait_for_prompt(":", timeout)
@@ -105,41 +352,36 @@ class Console:
         ctrl_a_pressed = False
         while True:
             try:
-                if self.serial.in_waiting > 0:
-                    data = self.serial.read(1)
-                    if len(data) > 0:
-                        try:
-                            sys.stdout.write(data.decode(cp))
-                        except UnicodeDecodeError:
-                            sys.stdout.write(f"\\x{data[0]:02x}")
-                        sys.stdout.flush()
-                key_in = self.term_windows_keyboard()
-                if key_in:
-                    if key_in == "\x01":  # CTRL-A
-                        ctrl_a_pressed = True
-                        self.serial.write(key_in.encode(cp))
-                    elif ctrl_a_pressed and key_in.lower() in "bf":
-                        self.send_break()  # eats prompt
-                        sys.stdout.write("\r\n]")  # fake prompt
-                        ctrl_a_pressed = False
-                    elif ctrl_a_pressed and key_in.lower() in "xq":
-                        sys.stdout.write("\r\n")
-                        break
-                    else:
-                        ctrl_a_pressed = False
-                        self.serial.write(key_in.encode(cp))
+                data = self.serial.read(1)
+                if len(data) > 0:
+                    try:
+                        sys.stdout.write(data.decode(cp))
+                    except UnicodeDecodeError:
+                        sys.stdout.write(f"\\x{data[0]:02x}")
+                    sys.stdout.flush()
                 else:
-                    if self.serial.in_waiting == 0:
+                    key_in = self.term_windows_keyboard()
+                    if key_in:
+                        if key_in == "\x01":  # CTRL-A
+                            ctrl_a_pressed = True
+                            self.serial.write(key_in.encode(cp))
+                        elif ctrl_a_pressed and key_in.lower() in "bf":
+                            self.send_break()  # eats prompt
+                            sys.stdout.write("\r\n]")  # fake prompt
+                            ctrl_a_pressed = False
+                        elif ctrl_a_pressed and key_in.lower() in "xq":
+                            sys.stdout.write("\r\n")
+                            break
+                        else:
+                            ctrl_a_pressed = False
+                            self.serial.write(key_in.encode(cp))
+                    else:
                         time.sleep(0.001)
             except KeyboardInterrupt:
                 self.serial.write(b"\x03")
 
     def term_windows_keyboard(self) -> Union[str, None]:
         """Get a key event as ANSI using Windows Console API"""
-
-        # FFI setup
-        from ctypes import wintypes
-
         if not hasattr(self, "_stdin_handle"):
             self._stdin_handle = ctypes.windll.kernel32.GetStdHandle(-10)
 
@@ -272,19 +514,19 @@ class Console:
             return char
         return None
 
-    def send_break(self, duration: float = 0.01, retries: int = 1):
+    def send_break(self):
         """Stop the 6502 and return to monitor."""
-        self.serial.read_all()
-        self.serial.send_break(duration)
+        # Try twice in case RIA is writing
         try:
+            self.serial.flush_read_bufs()
+            self.serial.send_break()
             self.wait_for_prompt("]")
-            return
-        except TimeoutError as te:
-            if retries <= 0:
-                raise
-        self.send_break(duration, retries - 1)
+        except TimeoutError:
+            self.serial.flush_read_bufs()
+            self.serial.send_break()
+            self.wait_for_prompt("]")
 
-    def command(self, cmd: str, timeout: float = DEFAULT_TIMEOUT):
+    def command(self, cmd: str, timeout: float = RESPONSE_TIMEOUT):
         """Send one command and wait for next monitor prompt."""
         self.serial.write(bytes(cmd, "ascii"))
         self.serial.write(b"\r")
@@ -326,19 +568,19 @@ class Console:
             addr += len(data)
             addr, data = rom.next_rom_data(addr)
 
-    def wait_for_prompt(self, prompt: str, timeout: float = DEFAULT_TIMEOUT):
+    def wait_for_prompt(self, prompt: str, timeout: float = RESPONSE_TIMEOUT):
         """Wait for a specific prompt from the device."""
         prompt_bytes = bytes(prompt, "ascii")
         start = time.monotonic()
         at_line_start = True
         while True:
             if len(prompt) == 1:
-                data = self.serial.read()
+                data = self.serial.read(1)
                 if at_line_start and data == b"?":
                     monitor_result = data.decode("ascii")
                     monitor_result += self.serial.read_until().decode("ascii").strip()
                     raise RuntimeError(monitor_result)
-                at_line_start = (data == b"\n" or data == b"\r")
+                at_line_start = data == b"\n" or data == b"\r"
             else:
                 data = self.serial.read_until()
                 if data.startswith(b"?"):
@@ -352,23 +594,25 @@ class Console:
                     raise TimeoutError()
 
 
+class ROMException(Exception):
+    """Custom exception for ROM-related errors."""
+
+
 class ROM:
-    """Virtual ROM aka The RP6502 ROM."""
+    """Virtual ROM builder."""
 
     def __init__(self):
         """ROMs begin with up to a screen of help text"""
         """followed by a sparse array of virtual ROM."""
         self.help = []
-        self.data = [0 for i in range(0x20000)]
-        self.alloc = [0 for i in range(0x20000)]
+        self.data = {}
+        self.alloc = {}
 
     def add_help(self, string: str):
         """Add help string."""
         if len(string) > 80:
-            raise RuntimeError("Help line > 80 cols")
+            raise ROMException("Help line > 80 cols")
         self.help.append(string)
-        if len(self.help) > 24:
-            raise RuntimeError("Help lines > 24 rows")
 
     def add_binary_data(self, data: bytes, addr: int):
         """Add binary data to ROM."""
@@ -380,7 +624,7 @@ class ROM:
     def add_nmi_vector(self, addr: int):
         """Set NMI vector in $FFFA and $FFFB."""
         if not (0 <= addr <= 0xFFFF):
-            raise RuntimeError(f"Invalid NMI vector: ${addr:04X}")
+            raise ROMException(f"Invalid NMI vector: ${addr:04X}")
         self.allocate_rom(0xFFFA, 2)
         self.data[0xFFFA] = addr & 0xFF
         self.data[0xFFFB] = addr >> 8
@@ -388,7 +632,7 @@ class ROM:
     def add_reset_vector(self, addr: int):
         """Set reset vector in $FFFC and $FFFD."""
         if not (0 <= addr <= 0xFFFF):
-            raise RuntimeError(f"Invalid reset vector: ${addr:04X}")
+            raise ROMException(f"Invalid reset vector: ${addr:04X}")
         self.allocate_rom(0xFFFC, 2)
         self.data[0xFFFC] = addr & 0xFF
         self.data[0xFFFD] = addr >> 8
@@ -396,7 +640,7 @@ class ROM:
     def add_irq_vector(self, addr: int):
         """Set IRQ vector in $FFFE and $FFFF."""
         if not (0 <= addr <= 0xFFFF):
-            raise RuntimeError(f"Invalid IRQ vector: ${addr:04X}")
+            raise ROMException(f"Invalid IRQ vector: ${addr:04X}")
         self.allocate_rom(0xFFFE, 2)
         self.data[0xFFFE] = addr & 0xFF
         self.data[0xFFFF] = addr >> 8
@@ -409,43 +653,43 @@ class ROM:
         with open(file, "rb") as f:
             data = f.read()
         if addr["data"] is None:
-            raise RuntimeError("Address for data is required.")
+            raise ROMException("Address for data is required.")
         if addr["data"] is True:
             if len(data) < 2:
-                raise RuntimeError("No data address found in file.")
+                raise ROMException("No data address found in file.")
             addr["data"] = data[0] + data[1] * 256
             data = data[2:]
         if addr["nmi"] is True:
             if len(data) < 2:
-                raise RuntimeError("No nmi address found in file.")
+                raise ROMException("No nmi address found in file.")
             addr["nmi"] = data[0] + data[1] * 256
             data = data[2:]
         if addr["nmi"]:
             self.add_nmi_vector(addr["nmi"])
         if addr["reset"] is True:
             if len(data) < 2:
-                raise RuntimeError("No reset address found in file.")
+                raise ROMException("No reset address found in file.")
             addr["reset"] = data[0] + data[1] * 256
             data = data[2:]
         if addr["reset"]:
             self.add_reset_vector(addr["reset"])
         if addr["irq"] is True:
             if len(data) < 2:
-                raise RuntimeError("No irq address found in file.")
+                raise ROMException("No irq address found in file.")
             addr["irq"] = data[0] + data[1] * 256
             data = data[2:]
         if addr["irq"]:
             self.add_irq_vector(addr["irq"])
         self.add_binary_data(data, addr["data"])
 
-    def add_rp6502_file(self, file: str):
-        """Add RP6502 ROM data from file."""
+    def add_rom_file(self, file: str):
+        """Add ROM data from file."""
         with open(file, "rb") as f:
             # Decode first line as cp850 because binary garbage can
             # raise here before our better message gets to the user.
             command = f.readline().decode("cp850")
-            if not re.match(r"^#![Rr][Pp]6502\r?\n$", command):
-                raise RuntimeError(f"Invalid RP6502 ROM file: {file}")
+            if not re.match(f"^#!{SCRIPT_NAME}\\r?\\n$", command, re.IGNORECASE):
+                raise ROMException(f"Invalid ROM file: {file}")
             while True:
                 command = f.readline().decode("ascii").rstrip()
                 if len(command) == 0:
@@ -467,7 +711,7 @@ class ROM:
                         if re.match(r"^(0x|)[0-9A-Fa-f]*$", addr_str):
                             return int(addr_str, 0)
                         else:
-                            raise RuntimeError(f"Invalid address: {addr_str}")
+                            raise ROMException(f"Invalid address: {addr_str}")
 
                     addr = str_to_address(data_match.group(1))
                     length = str_to_address(data_match.group(2))
@@ -475,26 +719,21 @@ class ROM:
                     self.allocate_rom(addr, length)
                     data = f.read(length)
                     if len(data) != length or crc != binascii.crc32(data):
-                        raise RuntimeError(f"Invalid CRC in block address: ${addr:04X}")
+                        raise ROMException(f"Invalid CRC in block address: ${addr:04X}")
                     for i in range(length):
                         self.data[addr + i] = data[i]
                     continue
-                raise RuntimeError(f"Corrupt RP6502 ROM file: {file}")
+                raise ROMException(f"Corrupt ROM file: {file}")
 
     def allocate_rom(self, addr: int, length: int):
         """Marks a range of memory as used."""
-        if (
-            (addr < 0x10000 and addr + length > 0x10000)
-            or addr + length > 0x20000
-            or addr < 0
-            or length < 0
-        ):
-            raise IndexError(
-                f"RP6502 invalid address ${addr:04X} or length ${length:03X}"
+        if addr + length > 0x1000000 or addr < 0 or length < 0:
+            raise ROMException(
+                f"ROM address invalid ${addr:04X} or length ${length:03X}"
             )
         for i in range(length):
-            if self.alloc[addr + i]:
-                raise MemoryError(f"RP6502 ROM data already exists at ${addr+i:04X}")
+            if self.alloc.get(addr + i):
+                raise ROMException(f"ROM data already exists at ${addr+i:04X}")
             self.alloc[addr + i] = 1
 
     def has_reset_vector(self) -> bool:
@@ -502,32 +741,50 @@ class ROM:
         return bool(self.alloc[0xFFFC] and self.alloc[0xFFFD])
 
     def next_rom_data(self, addr: int):
-        """Find next up-to-1k chunk starting at addr."""
-        for addr in range(addr, 0x20000):
-            if self.alloc[addr]:
+        """Find next up-to-1k chunk starting at addr, never crossing 64k page."""
+        for addr in range(addr, 0x1000000):
+            if self.alloc.get(addr):
+                page_end = (addr | 0xFFFF) + 1
                 length = 0
-                while self.alloc[addr + length]:
+                while self.alloc.get(addr + length):
                     length += 1
-                    if length == 1024 or addr + length == 0x10000:
+                    if length == 1024 or addr + length == page_end:
                         break
-                return addr, bytearray(self.data[addr : addr + length])
+                return addr, bytearray(self.data[addr + i] for i in range(length))
         return None, None
 
 
 def exec_args():
     # Standard library argument parser
+    class CustomFormatter(argparse.HelpFormatter):
+        def __init__(self, prog):
+            super().__init__(prog, max_help_position=27)
+
     parser = argparse.ArgumentParser(
-        description="Interface with RP6502 RIA console. Manage RP6502 ROM packaging."
+        description="Interface with RIA console. Manage ROM packaging.",
+        formatter_class=CustomFormatter,
     )
-    parser.add_argument(
-        "command",
-        choices=["run", "upload", "basic", "create"],
-        help="{Run} local RP6502 ROM file by sending to RP6502 RAM. "
-        "{Upload} any local files to RP6502 USB storage. "
-        "{Basic} executes a program with the installed BASIC. "
-        "{Create} RP6502 ROM file from a local binary file and additional local ROM files.",
-    )
-    parser.add_argument("filename", nargs="*", help="Local filename(s).")
+    sp = parser.add_subparsers(dest="command", required=True)
+    cmds = {
+        "term": ("Attach to the RIA console.", None),
+        "run": ("Run local ROM by sending to RIA.", 1),
+        "upload": ("Upload local files to RIA USB storage.", "+"),
+        "basic": ("Executes a program with the installed BASIC.", 1),
+        "create": (
+            "Create local ROM file from a file. Additional local ROM files will be merged.",
+            "+",
+        ),
+    }
+    parsers = {}
+    for cmd, (desc, nargs) in cmds.items():
+        parsers[cmd] = sp.add_parser(cmd, description=desc, help=desc)
+        if nargs:
+            parsers[cmd].add_argument(
+                "filename",
+                nargs=nargs,
+                help="Local filename." if nargs == 1 else "Local filename(s).",
+            )
+
     parser.add_argument("-o", dest="out", metavar="name", help="Output path/filename.")
     parser.add_argument(
         "-a",
@@ -565,7 +822,15 @@ def exec_args():
         help=f"Configuration file for console connection.",
     )
     parser.add_argument(
-        "-D",
+        "-t",
+        "--term",
+        dest="term",
+        metavar="bool",
+        default="True",
+        help=f"Attach to console terminal on run.",
+    )
+    parser.add_argument(
+        "-d",
         "--device",
         dest="device",
         metavar="dev",
@@ -573,12 +838,12 @@ def exec_args():
         help=f"Serial device name. Default={Console.default_device()}",
     )
     parser.add_argument(
-        "-t",
-        "--term",
-        dest="term",
-        metavar="bool",
-        default="True",
-        help=f"Enables console terminal on run.",
+        # Hidden alias for anyone used to minicom -D /dev/
+        "-D",
+        dest="device",
+        metavar="dev",
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
     )
     args = parser.parse_args()
 
@@ -586,14 +851,14 @@ def exec_args():
     if args.config:
         config = configparser.ConfigParser()
         if not os.path.exists(args.config):
-            config["RP6502"] = {"device": args.device, "term": args.term}
+            config[SCRIPT_NAME] = {"device": args.device, "term": args.term}
             with open(args.config, "w") as cfg:
                 config.write(cfg)
         else:
             config.read(args.config)
-        if config.has_section("RP6502"):
-            args.device = config["RP6502"].get("device", args.device)
-            args.term = config["RP6502"].get("term", args.term)
+        if config.has_section(SCRIPT_NAME):
+            args.device = config[SCRIPT_NAME].get("device", args.device)
+            args.term = config[SCRIPT_NAME].get("term", args.term)
 
     # Because parser is bad at bool
     if args.term.lower() in ["t", "true"] or (args.term.isdigit() and args.term != "0"):
@@ -619,41 +884,37 @@ def exec_args():
     args.irq = str_to_address(parser, args.irq, "-i/--irq")
 
     # Open console and extend error with a hint about the config file
-    if args.command in ["run", "upload", "basic"]:
-        print(f"[{os.path.basename(__file__)}] Opening device {args.device}")
-        try:
-            console = Console(args.device)
-        except serial.SerialException as se:
-            # On Windows, se.errno is None; on Unix it's 2 when serial port not found.
-            if args.config and ("FileNotFoundError" in str(se) or se.errno == 2):
-                error_msg = f"Using device config in {args.config}\n{str(se)}"
-                raise serial.SerialException(error_msg) from se
-            else:
-                raise
+    if args.command in ["term", "run", "upload", "basic"]:
+        if args.config:
+            print(f"[{SCRIPT_FILE}] Using device config in {args.config}")
+        print(f"[{SCRIPT_FILE}] Opening device {args.device}")
+        console = Console(args.device)
         console.send_break()
 
-    # python3 rp6502.py run
+    if args.command == "term":
+        code_page = console.code_page()
+        console.terminal(code_page)
+
     if args.command == "run":
-        print(f"[{os.path.basename(__file__)}] Loading ROM {args.filename[0]}")
+        print(f"[{SCRIPT_FILE}] Loading ROM {args.filename[0]}")
         rom = ROM()
-        rom.add_rp6502_file(args.filename[0])
+        rom.add_rom_file(args.filename[0])
         if args.reset != None:
             rom.add_reset_vector(args.reset)
-        print(f"[{os.path.basename(__file__)}] Sending ROM")
+        print(f"[{SCRIPT_FILE}] Sending ROM")
         console.send_rom(rom)
         if args.term:
             code_page = console.code_page()
         if rom.has_reset_vector():
             console.reset()
         else:
-            print(f"[{os.path.basename(__file__)}] No reset vector. Not resetting.")
+            print(f"[{SCRIPT_FILE}] No reset vector")
         if args.term:
             console.terminal(code_page)
 
-    # python3 rp6502.py upload
     if args.command == "upload":
         for file in args.filename:
-            print(f"[{os.path.basename(__file__)}] Uploading {file}")
+            print(f"[{SCRIPT_FILE}] Uploading {file}")
             with open(file, "rb") as f:
                 if len(args.filename) == 1 and args.out != None:
                     dest = args.out
@@ -661,13 +922,12 @@ def exec_args():
                     dest = os.path.basename(file)
                 console.upload(f, dest)
 
-    # python3 rp6502.py basic
     if args.command == "basic":
         code_page = console.code_page()
-        print(f"[{os.path.basename(__file__)}] Starting BASIC")
+        print(f"[{SCRIPT_FILE}] Starting BASIC")
         console.serial.write(b"BASIC\r")
         console.wait_for_prompt("READY\r\n")
-        print(f"[{os.path.basename(__file__)}] Uploading program")
+        print(f"[{SCRIPT_FILE}] Uploading program")
         with open(args.filename[0], "r", encoding="utf-8") as f:
             for line_num, line in enumerate(f):
                 # Wait the perfect amount of time it takes to parse the line
@@ -685,7 +945,6 @@ def exec_args():
         if args.term:
             console.terminal(code_page)
 
-    # python3 rp6502.py create
     if args.command == "create":
         if args.out == None:
             parser.error(f"argument -o required")
@@ -703,9 +962,9 @@ def exec_args():
         )
         for file in args.filename[1:]:
             print(f"[{os.path.basename(__file__)}] Adding ROM asset {file}")
-            rom.add_rp6502_file(file)
+            rom.add_rom_file(file)
         with open(args.out, "wb+") as file:
-            file.write(b"#!RP6502\n")
+            file.write(f"#!{SCRIPT_NAME}\n".encode("ascii"))
             for help in rom.help:
                 file.write(bytes(f"# {help}\n", "ascii"))
             addr, data = rom.next_rom_data(0)
@@ -721,22 +980,19 @@ def exec_args():
                 addr, data = rom.next_rom_data(addr)
 
 
-# This file may be included or run like a program. e.g.
-#   import importlib
-#   rp6502 = importlib.import_module("tools.rp6502")
+# This file may be included or run like a program.
 if __name__ == "__main__":
     # VSCode SIGKILLs the terminal while in raw mode, return to cooked mode.
     if "tty" in globals() and sys.stdin.isatty():
         os.system("stty sane")
-    # Catch the two most common failures when using from VSCode so that a
-    # terminal message is displayed instead of triggering the Python debugger.
+    # These exceptions are a normal part of using this tool in a build system.
+    # It's annoying when a debugger catches them so we intercept to exit cleanly.
     try:
         exec_args()
-    except serial.SerialException as se:
-        print(f"[{os.path.basename(__file__)}] {str(se)}")
-    except FileNotFoundError as fe:
-        error_msg = str(fe)
-        if re.search(r"\$\{[^}]*\}\.rp6502", error_msg):
-            print(f"[{os.path.basename(__file__)}] Build may have failed.\n{error_msg}")
-        else:
-            raise
+    except (ROMException, FileNotFoundError) as e:
+        error_msg = str(e)
+        # Unresolved variable substitutions like ${command:cmake.launchTargetPath}
+        if re.search(r"\$\{[^}]*\}", error_msg):
+            print(f"[{os.path.basename(__file__)}] Check build for failures")
+        print(error_msg)
+        os._exit(1)  # special exit without raising
