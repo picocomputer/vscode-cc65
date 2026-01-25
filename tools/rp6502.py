@@ -516,9 +516,15 @@ class Console:
 
     def send_break(self):
         """Stop the 6502 and return to monitor."""
-        self.serial.flush_read_bufs()
-        self.serial.send_break()
-        self.wait_for_prompt("]")
+        # Try twice in case RIA is writing
+        try:
+            self.serial.flush_read_bufs()
+            self.serial.send_break()
+            self.wait_for_prompt("]")
+        except TimeoutError:
+            self.serial.flush_read_bufs()
+            self.serial.send_break()
+            self.wait_for_prompt("]")
 
     def command(self, cmd: str, timeout: float = RESPONSE_TIMEOUT):
         """Send one command and wait for next monitor prompt."""
