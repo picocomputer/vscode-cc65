@@ -34,11 +34,13 @@ try:
 except (ImportError, AttributeError):
     pass
 
+# Rename this file for use on other platforms.
+SCRIPT_FILE = os.path.basename(__file__)
+SCRIPT_NAME = os.path.splitext(SCRIPT_FILE)[0].upper()
+
+# Two seconds is generous but not
+# so short that it becomes suspect.
 RESPONSE_TIMEOUT = 2.0
-
-
-class SerialPortException(Exception):
-    """Custom exception for serial port errors."""
 
 
 class SerialPort:
@@ -67,7 +69,7 @@ class SerialPort:
             # Set baud rate
             baud_constant = getattr(termios, f"B{self._baudrate}", None)
             if baud_constant is None:
-                raise SerialPortException(f"Unsupported baud rate: {self._baudrate}")
+                raise OSError(f"Unsupported baud rate: {self._baudrate}")
             attrs[0] = 0  # Input flags: no processing
             attrs[1] = 0  # Output flags: no processing
             attrs[2] = (
@@ -98,6 +100,7 @@ class SerialPort:
         self._handle = kernel32.CreateFileW(
             port_name, GENERIC_READ_WRITE, 0, None, OPEN_EXISTING, 0, None
         )
+        # Mimic POSIX error here
         if self._handle in (-1, 0):
             raise FileNotFoundError(f"No such device: '{self._port}'")
 
@@ -138,7 +141,7 @@ class SerialPort:
         dcb.DCBlength = ctypes.sizeof(DCB)
         if not kernel32.GetCommState(self._handle, ctypes.byref(dcb)):
             kernel32.CloseHandle(self._handle)
-            raise SerialPortException(f"Could not get COM state for {self._port}")
+            raise OSError(f"Could not get COM state for {self._port}")
         # Set 8N1 format with DTR/RTS enabled
         dcb.BaudRate = self._baudrate
         dcb.ByteSize = 8
@@ -152,7 +155,7 @@ class SerialPort:
         dcb.fOutxDsrFlow = 0
         if not kernel32.SetCommState(self._handle, ctypes.byref(dcb)):
             kernel32.CloseHandle(self._handle)
-            raise SerialPortException(f"Could not set COM state for {self._port}")
+            raise OSError(f"Could not set COM state for {self._port}")
 
         # Configure read/write timeouts
         class COMMTIMEOUTS(ctypes.Structure):
@@ -172,7 +175,7 @@ class SerialPort:
         timeouts.WriteTotalTimeoutConstant = 0
         if not kernel32.SetCommTimeouts(self._handle, ctypes.byref(timeouts)):
             kernel32.CloseHandle(self._handle)
-            raise SerialPortException(f"Could not set timeouts for {self._port}")
+            raise OSError(f"Could not set timeouts for {self._port}")
 
     def write(self, data: bytes):
         """Write data to the serial port."""
@@ -187,7 +190,7 @@ class SerialPort:
             if not kernel32.WriteFile(
                 self._handle, buffer, len(data), ctypes.byref(written), None
             ):
-                raise SerialPortException("kernel32.WriteFile failed")
+                raise OSError("kernel32.WriteFile failed")
 
     def read(self, size: int = 1) -> bytes:
         """Read up to size bytes from the serial port."""
@@ -585,6 +588,10 @@ class Console:
                     raise TimeoutError()
 
 
+class ROMException(Exception):
+    """Custom exception for ROM-related errors."""
+
+
 class ROM:
     """Virtual ROM builder."""
 
@@ -592,13 +599,13 @@ class ROM:
         """ROMs begin with up to a screen of help text"""
         """followed by a sparse array of virtual ROM."""
         self.help = []
-        self.data = [0 for i in range(0x20000)]
-        self.alloc = [0 for i in range(0x20000)]
+        self.data = {}
+        self.alloc = {}
 
     def add_help(self, string: str):
         """Add help string."""
         if len(string) > 80:
-            raise RuntimeError("Help line > 80 cols")
+            raise ROMException("Help line > 80 cols")
         self.help.append(string)
 
     def add_binary_data(self, data: bytes, addr: int):
@@ -611,7 +618,7 @@ class ROM:
     def add_nmi_vector(self, addr: int):
         """Set NMI vector in $FFFA and $FFFB."""
         if not (0 <= addr <= 0xFFFF):
-            raise RuntimeError(f"Invalid NMI vector: ${addr:04X}")
+            raise ROMException(f"Invalid NMI vector: ${addr:04X}")
         self.allocate_rom(0xFFFA, 2)
         self.data[0xFFFA] = addr & 0xFF
         self.data[0xFFFB] = addr >> 8
@@ -619,7 +626,7 @@ class ROM:
     def add_reset_vector(self, addr: int):
         """Set reset vector in $FFFC and $FFFD."""
         if not (0 <= addr <= 0xFFFF):
-            raise RuntimeError(f"Invalid reset vector: ${addr:04X}")
+            raise ROMException(f"Invalid reset vector: ${addr:04X}")
         self.allocate_rom(0xFFFC, 2)
         self.data[0xFFFC] = addr & 0xFF
         self.data[0xFFFD] = addr >> 8
@@ -627,7 +634,7 @@ class ROM:
     def add_irq_vector(self, addr: int):
         """Set IRQ vector in $FFFE and $FFFF."""
         if not (0 <= addr <= 0xFFFF):
-            raise RuntimeError(f"Invalid IRQ vector: ${addr:04X}")
+            raise ROMException(f"Invalid IRQ vector: ${addr:04X}")
         self.allocate_rom(0xFFFE, 2)
         self.data[0xFFFE] = addr & 0xFF
         self.data[0xFFFF] = addr >> 8
@@ -640,29 +647,29 @@ class ROM:
         with open(file, "rb") as f:
             data = f.read()
         if addr["data"] is None:
-            raise RuntimeError("Address for data is required.")
+            raise ROMException("Address for data is required.")
         if addr["data"] is True:
             if len(data) < 2:
-                raise RuntimeError("No data address found in file.")
+                raise ROMException("No data address found in file.")
             addr["data"] = data[0] + data[1] * 256
             data = data[2:]
         if addr["nmi"] is True:
             if len(data) < 2:
-                raise RuntimeError("No nmi address found in file.")
+                raise ROMException("No nmi address found in file.")
             addr["nmi"] = data[0] + data[1] * 256
             data = data[2:]
         if addr["nmi"]:
             self.add_nmi_vector(addr["nmi"])
         if addr["reset"] is True:
             if len(data) < 2:
-                raise RuntimeError("No reset address found in file.")
+                raise ROMException("No reset address found in file.")
             addr["reset"] = data[0] + data[1] * 256
             data = data[2:]
         if addr["reset"]:
             self.add_reset_vector(addr["reset"])
         if addr["irq"] is True:
             if len(data) < 2:
-                raise RuntimeError("No irq address found in file.")
+                raise ROMException("No irq address found in file.")
             addr["irq"] = data[0] + data[1] * 256
             data = data[2:]
         if addr["irq"]:
@@ -675,8 +682,8 @@ class ROM:
             # Decode first line as cp850 because binary garbage can
             # raise here before our better message gets to the user.
             command = f.readline().decode("cp850")
-            if not re.match(r"^#![Rr][Pp]6502\r?\n$", command):
-                raise RuntimeError(f"Invalid ROM file: {file}")
+            if not re.match(f"^#!{SCRIPT_NAME}\\r?\\n$", command, re.IGNORECASE):
+                raise ROMException(f"Invalid ROM file: {file}")
             while True:
                 command = f.readline().decode("ascii").rstrip()
                 if len(command) == 0:
@@ -698,7 +705,7 @@ class ROM:
                         if re.match(r"^(0x|)[0-9A-Fa-f]*$", addr_str):
                             return int(addr_str, 0)
                         else:
-                            raise RuntimeError(f"Invalid address: {addr_str}")
+                            raise ROMException(f"Invalid address: {addr_str}")
 
                     addr = str_to_address(data_match.group(1))
                     length = str_to_address(data_match.group(2))
@@ -706,24 +713,21 @@ class ROM:
                     self.allocate_rom(addr, length)
                     data = f.read(length)
                     if len(data) != length or crc != binascii.crc32(data):
-                        raise RuntimeError(f"Invalid CRC in block address: ${addr:04X}")
+                        raise ROMException(f"Invalid CRC in block address: ${addr:04X}")
                     for i in range(length):
                         self.data[addr + i] = data[i]
                     continue
-                raise RuntimeError(f"Corrupt ROM file: {file}")
+                raise ROMException(f"Corrupt ROM file: {file}")
 
     def allocate_rom(self, addr: int, length: int):
         """Marks a range of memory as used."""
-        if (
-            (addr < 0x10000 and addr + length > 0x10000)
-            or addr + length > 0x20000
-            or addr < 0
-            or length < 0
-        ):
-            raise IndexError(f"ROM address invalid ${addr:04X} or length ${length:03X}")
+        if addr + length > 0x1000000 or addr < 0 or length < 0:
+            raise ROMException(
+                f"ROM address invalid ${addr:04X} or length ${length:03X}"
+            )
         for i in range(length):
-            if self.alloc[addr + i]:
-                raise MemoryError(f"ROM data already exists at ${addr+i:04X}")
+            if self.alloc.get(addr + i):
+                raise ROMException(f"ROM data already exists at ${addr+i:04X}")
             self.alloc[addr + i] = 1
 
     def has_reset_vector(self) -> bool:
@@ -731,15 +735,16 @@ class ROM:
         return bool(self.alloc[0xFFFC] and self.alloc[0xFFFD])
 
     def next_rom_data(self, addr: int):
-        """Find next up-to-1k chunk starting at addr."""
-        for addr in range(addr, 0x20000):
-            if self.alloc[addr]:
+        """Find next up-to-1k chunk starting at addr, never crossing 64k page."""
+        for addr in range(addr, 0x1000000):
+            if self.alloc.get(addr):
+                page_end = (addr | 0xFFFF) + 1
                 length = 0
-                while self.alloc[addr + length]:
+                while self.alloc.get(addr + length):
                     length += 1
-                    if length == 1024 or addr + length == 0x10000:
+                    if length == 1024 or addr + length == page_end:
                         break
-                return addr, bytearray(self.data[addr : addr + length])
+                return addr, bytearray(self.data[addr + i] for i in range(length))
         return None, None
 
 
@@ -840,14 +845,14 @@ def exec_args():
     if args.config:
         config = configparser.ConfigParser()
         if not os.path.exists(args.config):
-            config["RP6502"] = {"device": args.device, "term": args.term}
+            config[SCRIPT_NAME] = {"device": args.device, "term": args.term}
             with open(args.config, "w") as cfg:
                 config.write(cfg)
         else:
             config.read(args.config)
-        if config.has_section("RP6502"):
-            args.device = config["RP6502"].get("device", args.device)
-            args.term = config["RP6502"].get("term", args.term)
+        if config.has_section(SCRIPT_NAME):
+            args.device = config[SCRIPT_NAME].get("device", args.device)
+            args.term = config[SCRIPT_NAME].get("term", args.term)
 
     # Because parser is bad at bool
     if args.term.lower() in ["t", "true"] or (args.term.isdigit() and args.term != "0"):
@@ -876,9 +881,9 @@ def exec_args():
     if args.command in ["term", "run", "upload", "basic"]:
         if args.config:
             print(
-                f"[{os.path.basename(__file__)}] Using device config in {args.config}"
+                f"[{SCRIPT_FILE}] Using device config in {args.config}"
             )
-        print(f"[{os.path.basename(__file__)}] Opening device {args.device}")
+        print(f"[{SCRIPT_FILE}] Opening device {args.device}")
         console = Console(args.device)
         console.send_break()
 
@@ -887,25 +892,25 @@ def exec_args():
         console.terminal(code_page)
 
     if args.command == "run":
-        print(f"[{os.path.basename(__file__)}] Loading ROM {args.filename[0]}")
+        print(f"[{SCRIPT_FILE}] Loading ROM {args.filename[0]}")
         rom = ROM()
         rom.add_rom_file(args.filename[0])
         if args.reset != None:
             rom.add_reset_vector(args.reset)
-        print(f"[{os.path.basename(__file__)}] Sending ROM")
+        print(f"[{SCRIPT_FILE}] Sending ROM")
         console.send_rom(rom)
         if args.term:
             code_page = console.code_page()
         if rom.has_reset_vector():
             console.reset()
         else:
-            print(f"[{os.path.basename(__file__)}] No reset vector")
+            print(f"[{SCRIPT_FILE}] No reset vector")
         if args.term:
             console.terminal(code_page)
 
     if args.command == "upload":
         for file in args.filename:
-            print(f"[{os.path.basename(__file__)}] Uploading {file}")
+            print(f"[{SCRIPT_FILE}] Uploading {file}")
             with open(file, "rb") as f:
                 if len(args.filename) == 1 and args.out != None:
                     dest = args.out
@@ -915,10 +920,10 @@ def exec_args():
 
     if args.command == "basic":
         code_page = console.code_page()
-        print(f"[{os.path.basename(__file__)}] Starting BASIC")
+        print(f"[{SCRIPT_FILE}] Starting BASIC")
         console.serial.write(b"BASIC\r")
         console.wait_for_prompt("READY\r\n")
-        print(f"[{os.path.basename(__file__)}] Uploading program")
+        print(f"[{SCRIPT_FILE}] Uploading program")
         with open(args.filename[0], "r", encoding="utf-8") as f:
             for line_num, line in enumerate(f):
                 # Wait the perfect amount of time it takes to parse the line
@@ -955,7 +960,7 @@ def exec_args():
             print(f"[{os.path.basename(__file__)}] Adding ROM asset {file}")
             rom.add_rom_file(file)
         with open(args.out, "wb+") as file:
-            file.write(b"#!RP6502\n")
+            file.write(f"#!{SCRIPT_NAME}\n".encode("ascii"))
             for help in rom.help:
                 file.write(bytes(f"# {help}\n", "ascii"))
             addr, data = rom.next_rom_data(0)
@@ -976,14 +981,14 @@ if __name__ == "__main__":
     # VSCode SIGKILLs the terminal while in raw mode, return to cooked mode.
     if "tty" in globals() and sys.stdin.isatty():
         os.system("stty sane")
-    # Catch build and serial port failures when using from VSCode so that a
-    # terminal message is displayed instead of triggering the Python debugger.
+    # These exceptions are a normal part of using this tool in a build system.
+    # It's annoying when a debugger catches them so we intercept to exit cleanly.
     try:
         exec_args()
-    except FileNotFoundError as fe:
-        error_msg = str(fe)
-        # Detect unresolved variable substitutions like ${command:cmake.launchTargetPath}
+    except (ROMException, FileNotFoundError) as e:
+        error_msg = str(e)
+        # Unresolved variable substitutions like ${command:cmake.launchTargetPath}
         if re.search(r"\$\{[^}]*\}", error_msg):
             print(f"[{os.path.basename(__file__)}] Check build for failures")
         print(error_msg)
-        os._exit(1)  # exit without tripping the VSCode debugger
+        os._exit(1)  # special exit without raising
