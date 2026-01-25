@@ -880,9 +880,7 @@ def exec_args():
     # Open console and extend error with a hint about the config file
     if args.command in ["term", "run", "upload", "basic"]:
         if args.config:
-            print(
-                f"[{SCRIPT_FILE}] Using device config in {args.config}"
-            )
+            print(f"[{SCRIPT_FILE}] Using device config in {args.config}")
         print(f"[{SCRIPT_FILE}] Opening device {args.device}")
         console = Console(args.device)
         console.send_break()
