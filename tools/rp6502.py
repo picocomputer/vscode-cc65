@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # SPDX-License-Identifier: Unlicense
 
-# Developer tool for RP6502
+# RIA Developer tool
 
 import os
 import re
@@ -35,7 +35,6 @@ except (ImportError, AttributeError):
     pass
 
 RESPONSE_TIMEOUT = 2.0
-UART_BAUDRATE = 115200
 
 
 class SerialPortException(Exception):
@@ -43,11 +42,11 @@ class SerialPortException(Exception):
 
 
 class SerialPort:
-    """Cross-platform serial port implementation using standard library."""
+    """Cross-platform serial port implementation."""
 
-    def __init__(self, port: str, baudrate: int):
+    def __init__(self, port: str):
         self._port = port
-        self._baudrate = baudrate
+        self._baudrate = 115200
         self._fd = None
         self._handle = None
         self._is_posix = "tty" in globals()
@@ -279,7 +278,7 @@ class SerialPort:
 
 
 class Console:
-    """Manages the RP6502 console over a serial connection."""
+    """Manages the RIA console over a serial connection."""
 
     def default_device():
         # Hint at where the USB CDC mounts on various OSs
@@ -294,7 +293,7 @@ class Console:
 
     def __init__(self, name):
         """Initialize console over serial connection."""
-        self.serial = SerialPort(name, UART_BAUDRATE)
+        self.serial = SerialPort(name)
         self.serial.open()
 
     def code_page(self, timeout: float = RESPONSE_TIMEOUT) -> str:
@@ -587,7 +586,7 @@ class Console:
 
 
 class ROM:
-    """Virtual ROM aka The RP6502 ROM."""
+    """Virtual ROM builder."""
 
     def __init__(self):
         """ROMs begin with up to a screen of help text"""
@@ -601,8 +600,6 @@ class ROM:
         if len(string) > 80:
             raise RuntimeError("Help line > 80 cols")
         self.help.append(string)
-        if len(self.help) > 24:
-            raise RuntimeError("Help lines > 24 rows")
 
     def add_binary_data(self, data: bytes, addr: int):
         """Add binary data to ROM."""
@@ -672,14 +669,14 @@ class ROM:
             self.add_irq_vector(addr["irq"])
         self.add_binary_data(data, addr["data"])
 
-    def add_rp6502_file(self, file: str):
-        """Add RP6502 ROM data from file."""
+    def add_rom_file(self, file: str):
+        """Add ROM data from file."""
         with open(file, "rb") as f:
             # Decode first line as cp850 because binary garbage can
             # raise here before our better message gets to the user.
             command = f.readline().decode("cp850")
             if not re.match(r"^#![Rr][Pp]6502\r?\n$", command):
-                raise RuntimeError(f"Invalid RP6502 ROM file: {file}")
+                raise RuntimeError(f"Invalid ROM file: {file}")
             while True:
                 command = f.readline().decode("ascii").rstrip()
                 if len(command) == 0:
@@ -713,7 +710,7 @@ class ROM:
                     for i in range(length):
                         self.data[addr + i] = data[i]
                     continue
-                raise RuntimeError(f"Corrupt RP6502 ROM file: {file}")
+                raise RuntimeError(f"Corrupt ROM file: {file}")
 
     def allocate_rom(self, addr: int, length: int):
         """Marks a range of memory as used."""
@@ -723,12 +720,10 @@ class ROM:
             or addr < 0
             or length < 0
         ):
-            raise IndexError(
-                f"RP6502 invalid address ${addr:04X} or length ${length:03X}"
-            )
+            raise IndexError(f"ROM address invalid ${addr:04X} or length ${length:03X}")
         for i in range(length):
             if self.alloc[addr + i]:
-                raise MemoryError(f"RP6502 ROM data already exists at ${addr+i:04X}")
+                raise MemoryError(f"ROM data already exists at ${addr+i:04X}")
             self.alloc[addr + i] = 1
 
     def has_reset_vector(self) -> bool:
@@ -755,17 +750,17 @@ def exec_args():
             super().__init__(prog, max_help_position=27)
 
     parser = argparse.ArgumentParser(
-        description="Interface with RP6502 RIA console. Manage RP6502 ROM packaging.",
+        description="Interface with RIA console. Manage ROM packaging.",
         formatter_class=CustomFormatter,
     )
     sp = parser.add_subparsers(dest="command", required=True)
     cmds = {
-        "term": ("Attaches to the console.", None),
-        "run": ("Run local RP6502 ROM file by sending to RP6502 RAM.", 1),
-        "upload": ("Upload local files to RP6502 USB storage.", "+"),
+        "term": ("Attach to the RIA console.", None),
+        "run": ("Run local ROM by sending to RIA.", 1),
+        "upload": ("Upload local files to RIA USB storage.", "+"),
         "basic": ("Executes a program with the installed BASIC.", 1),
         "create": (
-            "Create RP6502 ROM file from a local binary file. Additional local ROM files will be merged.",
+            "Create local ROM file from a file. Additional local ROM files will be merged.",
             "+",
         ),
     }
@@ -832,7 +827,7 @@ def exec_args():
         help=f"Serial device name. Default={Console.default_device()}",
     )
     parser.add_argument(
-        # Hidden alias anyone used to minicom -D /dev/
+        # Hidden alias for anyone used to minicom -D /dev/
         "-D",
         dest="device",
         metavar="dev",
@@ -887,16 +882,14 @@ def exec_args():
         console = Console(args.device)
         console.send_break()
 
-    # python3 rp6502.py term
     if args.command == "term":
         code_page = console.code_page()
         console.terminal(code_page)
 
-    # python3 rp6502.py run
     if args.command == "run":
         print(f"[{os.path.basename(__file__)}] Loading ROM {args.filename[0]}")
         rom = ROM()
-        rom.add_rp6502_file(args.filename[0])
+        rom.add_rom_file(args.filename[0])
         if args.reset != None:
             rom.add_reset_vector(args.reset)
         print(f"[{os.path.basename(__file__)}] Sending ROM")
@@ -906,11 +899,10 @@ def exec_args():
         if rom.has_reset_vector():
             console.reset()
         else:
-            print(f"[{os.path.basename(__file__)}] No reset vector. Not resetting.")
+            print(f"[{os.path.basename(__file__)}] No reset vector")
         if args.term:
             console.terminal(code_page)
 
-    # python3 rp6502.py upload
     if args.command == "upload":
         for file in args.filename:
             print(f"[{os.path.basename(__file__)}] Uploading {file}")
@@ -921,7 +913,6 @@ def exec_args():
                     dest = os.path.basename(file)
                 console.upload(f, dest)
 
-    # python3 rp6502.py basic
     if args.command == "basic":
         code_page = console.code_page()
         print(f"[{os.path.basename(__file__)}] Starting BASIC")
@@ -945,7 +936,6 @@ def exec_args():
         if args.term:
             console.terminal(code_page)
 
-    # python3 rp6502.py create
     if args.command == "create":
         if args.out == None:
             parser.error(f"argument -o required")
@@ -963,7 +953,7 @@ def exec_args():
         )
         for file in args.filename[1:]:
             print(f"[{os.path.basename(__file__)}] Adding ROM asset {file}")
-            rom.add_rp6502_file(file)
+            rom.add_rom_file(file)
         with open(args.out, "wb+") as file:
             file.write(b"#!RP6502\n")
             for help in rom.help:
@@ -981,9 +971,7 @@ def exec_args():
                 addr, data = rom.next_rom_data(addr)
 
 
-# This file may be included or run like a program. e.g.
-#   import importlib
-#   rp6502 = importlib.import_module("tools.rp6502")
+# This file may be included or run like a program.
 if __name__ == "__main__":
     # VSCode SIGKILLs the terminal while in raw mode, return to cooked mode.
     if "tty" in globals() and sys.stdin.isatty():
@@ -994,7 +982,8 @@ if __name__ == "__main__":
         exec_args()
     except FileNotFoundError as fe:
         error_msg = str(fe)
-        if re.search(r"\$\{[^}]*\}\.rp6502", error_msg):
-            print(f"[{os.path.basename(__file__)}] Build may have failed.\n{error_msg}")
-        else:
-            print(error_msg)
+        # Detect unresolved variable substitutions like ${command:cmake.launchTargetPath}
+        if re.search(r"\$\{[^}]*\}", error_msg):
+            print(f"[{os.path.basename(__file__)}] Check build for failures")
+        print(error_msg)
+        os._exit(1)  # exit without tripping the VSCode debugger
