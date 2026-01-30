@@ -1,9 +1,6 @@
 {
     "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
     "cmake.showSystemKits": false,
-    "cmake.preferredGenerators": [
-        "Unix Makefiles",
-    ],
     "cmake.options.advanced": {
         "launch": {
             "statusBarVisibility": "hidden",

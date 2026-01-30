@@ -1,4 +1,5 @@
 # Add cmake commands: rp6502_executable() and rp6502_asset()
+cmake_minimum_required(VERSION 3.17)
 
 # Package the target as an RP6502 ROM.
 #
@@ -51,7 +52,7 @@ function(rp6502_executable name)
     endforeach()
     # Remove old ROM
     add_custom_command(TARGET ${name} PRE_BUILD
-        COMMAND ${CMAKE_COMMAND} -E remove
+        COMMAND ${CMAKE_COMMAND} -E rm -f
         "${CMAKE_CURRENT_BINARY_DIR}/${name}.rp6502"
     )
     # Create new ROM
