@@ -33,12 +33,16 @@ execute_process(
 )
 
 # Output stdout unchanged.
-message(STATUS "${STDOUT_OUTPUT}")
+if(STDOUT_OUTPUT)
+    message(STATUS "${STDOUT_OUTPUT}")
+endif()
 
-# Reformat stderr so VS Code problem matcher works. Just a case change.
-string(REGEX REPLACE "(:[0-9]+:) Error:" "\\1 error:" STDERR_OUTPUT "${STDERR_OUTPUT}")
-string(REGEX REPLACE "(:[0-9]+:) Warning:" "\\1 warning:" STDERR_OUTPUT "${STDERR_OUTPUT}")
-message(NOTICE "${STDERR_OUTPUT}")
+if(STDERR_OUTPUT)
+    # Reformat stderr so VS Code problem matcher works. Just a case change.
+    string(REGEX REPLACE "(:[0-9]+:) Error:" "\\1 error:" STDERR_OUTPUT "${STDERR_OUTPUT}")
+    string(REGEX REPLACE "(:[0-9]+:) Warning:" "\\1 warning:" STDERR_OUTPUT "${STDERR_OUTPUT}")
+    message(NOTICE "${STDERR_OUTPUT}")
+endif()
 
 # Return any non-zero exit code.
 if(NOT EXIT_CODE EQUAL 0)
