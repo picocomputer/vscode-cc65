@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 #
-# Copyright (c) 2025 Rumbledethumps
+# Copyright (c) 2026 Rumbledethumps
 #
 # SPDX-License-Identifier: BSD-3-Clause
 # SPDX-License-Identifier: Unlicense
 
-# RIA Developer tool
+# RP6502-RIA Developer tool
 
 import os
 import re
@@ -33,6 +33,10 @@ try:
     from ctypes import wintypes
 except (ImportError, AttributeError):
     pass
+
+# The run action will upload any ROM with application assets.
+# These are reserved system assets which won't trigger the upload.
+RESERVED_ASSETS = {"help", "icon"}
 
 # Rename this file for use on other platforms.
 SCRIPT_FILE = os.path.basename(__file__)
@@ -304,6 +308,7 @@ class Console:
         self.serial.write(b"set cp\r")
         self.wait_for_prompt(":", timeout)
         result = self.serial.read_until().decode("ascii")
+        self.wait_for_prompt("]", timeout)
         return f"cp{re.sub(r'[^0-9]', '', result)}"
 
     def terminal(self, cp):
@@ -591,7 +596,7 @@ class Console:
                 break
             if len(data) == 0:
                 if time.monotonic() - start > timeout:
-                    raise TimeoutError()
+                    raise TimeoutError("Timeout: console did not respond")
 
 
 class ROMException(Exception):
@@ -601,18 +606,29 @@ class ROMException(Exception):
 class ROM:
     """Virtual ROM builder."""
 
+    @staticmethod
+    def parse_int(s: str) -> int:
+        """Parse a numeric string with support for MOS $FFFF format."""
+        s = re.sub(r"^\$", "0x", s)
+        if not re.match(r"^(0x)?[0-9A-Fa-f]+$", s):
+            raise ValueError(f"Invalid hex address: {s!r}")
+        return int(s, 0)
+
     def __init__(self):
-        """ROMs begin with up to a screen of help text"""
-        """followed by a sparse array of virtual ROM."""
-        self.help = []
+        """Sparse array of virtual ROM with optional named assets."""
         self.data = {}
         self.alloc = {}
+        self.assets = []  # list of (name, bytes)
 
-    def add_help(self, string: str):
-        """Add help string."""
-        if len(string) > 80:
-            raise ROMException("Help line > 80 cols")
-        self.help.append(string)
+    def add_asset(self, name: str, data: bytes):
+        """Append a named asset to the ROM."""
+        if any(n == name for n, _ in self.assets):
+            raise ROMException(f"Asset name already exists: {name}")
+        self.assets.append((name, data))
+
+    def has_assets(self) -> bool:
+        """Returns true if there are non-reserved named assets."""
+        return any(n not in RESERVED_ASSETS for n, _ in self.assets)
 
     def add_binary_data(self, data: bytes, addr: int):
         """Add binary data to ROM."""
@@ -682,6 +698,31 @@ class ROM:
             self.add_irq_vector(addr["irq"])
         self.add_binary_data(data, addr["data"])
 
+    def _parse_memory_chunks(self, data: bytes):
+        """Parse classic memory chunk binary data and load into ROM."""
+        i = 0
+        while i < len(data):
+            try:
+                end = data.index(b"\n", i)
+            except ValueError:
+                raise ROMException("Truncated memory chunk header")
+            line = data[i:end].decode("ascii").rstrip()
+            i = end + 1
+            m = re.match(r"^(\S+)\s+(\S+)\s+(\S+)$", line)
+            if not m:
+                raise ROMException(f"Invalid memory chunk header: {line!r}")
+            try:
+                addr = ROM.parse_int(m.group(1))
+                length = ROM.parse_int(m.group(2))
+                crc = ROM.parse_int(m.group(3))
+            except ValueError as e:
+                raise ROMException(str(e)) from e
+            chunk = data[i : i + length]
+            if len(chunk) != length or binascii.crc32(chunk) != crc:
+                raise ROMException(f"Invalid CRC in block address: ${addr:04X}")
+            self.add_binary_data(chunk, addr)
+            i += length
+
     def add_rom_file(self, file: str):
         """Add ROM data from file."""
         with open(file, "rb") as f:
@@ -691,39 +732,32 @@ class ROM:
             if not re.match(f"^#!{SCRIPT_NAME}\\r?\\n$", command, re.IGNORECASE):
                 raise ROMException(f"Invalid ROM file: {file}")
             while True:
-                command = f.readline().decode("ascii").rstrip()
-                if len(command) == 0:
-                    break
-                help_match = re.search(r"^ *(# )", command)
-                if help_match:
-                    self.add_help(command[help_match.start(1) + 2 :])
-                    continue
-                if re.search(r"^ *#$", command):
-                    self.add_help("")
-                    continue
-                data_match = re.search(r"^ *([^ ]+) *([^ ]+) *([^ ]+) *$", command)
-                if data_match:
-
-                    def str_to_address(addr_str: str) -> int:
-                        """Supports $FFFF number format."""
-                        if addr_str:
-                            addr_str = re.sub(r"^\$", "0x", addr_str)
-                        if re.match(r"^(0x|)[0-9A-Fa-f]*$", addr_str):
-                            return int(addr_str, 0)
-                        else:
-                            raise ROMException(f"Invalid address: {addr_str}")
-
-                    addr = str_to_address(data_match.group(1))
-                    length = str_to_address(data_match.group(2))
-                    crc = str_to_address(data_match.group(3))
-                    self.allocate_rom(addr, length)
-                    data = f.read(length)
-                    if len(data) != length or crc != binascii.crc32(data):
-                        raise ROMException(f"Invalid CRC in block address: ${addr:04X}")
-                    for i in range(length):
-                        self.data[addr + i] = data[i]
-                    continue
-                raise ROMException(f"Corrupt ROM file: {file}")
+                line = f.readline()
+                if not line:
+                    break  # EOF
+                header = line.decode("ascii").rstrip("\r\n")
+                if not header:
+                    break  # empty line signals end
+                if not header.startswith("#>"):
+                    raise ROMException(f"Invalid ROM file: {file}")
+                parts = header[2:].split(None, 2)
+                if len(parts) < 2:
+                    raise ROMException(f"Invalid asset header: {header!r}")
+                try:
+                    asset_len = ROM.parse_int(parts[0])
+                    # CRC is present for tooling but not verified at load time
+                except ValueError as e:
+                    raise ROMException(str(e)) from e
+                asset_name = parts[2].strip() if len(parts) > 2 else None
+                asset_data = f.read(asset_len)
+                if len(asset_data) != asset_len:
+                    raise ROMException(
+                        f"Truncated asset data{f' for: {asset_name}' if asset_name else ''}"
+                    )
+                if asset_name is None:
+                    self._parse_memory_chunks(asset_data)
+                else:
+                    self.add_asset(asset_name, asset_data)
 
     def allocate_rom(self, addr: int, length: int):
         """Marks a range of memory as used."""
@@ -784,15 +818,14 @@ def exec_args():
                 nargs=nargs,
                 help="Local filename." if nargs == 1 else "Local filename(s).",
             )
-
-    parser.add_argument("-o", dest="out", metavar="name", help="Output path/filename.")
     parser.add_argument(
         "-a",
         "--address",
         dest="address",
         metavar="addr",
-        help="Starting address of data or `file` to read from file.",
+        help="Asset name (string) or starting address of binary data.",
     )
+    parser.add_argument("-o", dest="out", metavar="name", help="Output path/filename.")
     parser.add_argument(
         "-n",
         "--nmi",
@@ -814,6 +847,7 @@ def exec_args():
         metavar="addr",
         help="IRQ vector for $FFFE-$FFFF or `file` to read from file.",
     )
+
     parser.add_argument(
         "-c",
         "--config",
@@ -867,21 +901,24 @@ def exec_args():
         args.term = False
 
     # Additional validation and conversion
-    def str_to_address(parser, str, errmsg):
-        """Supports $FFFF number format."""
-        if str:
-            str = re.sub("^\\$", "0x", str)
-            if re.match("^(0x|)[0-9A-Fa-f]*$", str):
-                return int(str, 0)
-            elif str.lower() == "file":
+    def str_to_address(parser, s, errmsg):
+        """Parse an address string; returns int, True for 'file', or calls parser.error."""
+        if s:
+            if s.lower() == "file":
                 return True
-            else:
-                parser.error(f"argument {errmsg}: invalid address: '{str}'")
+            try:
+                return ROM.parse_int(s)
+            except ValueError:
+                parser.error(f"argument {errmsg}: invalid address: '{s}'")
 
-    args.address = str_to_address(parser, args.address, "-a/--address")
-    args.nmi = str_to_address(parser, args.nmi, "-n/--nmi")
-    args.reset = str_to_address(parser, args.reset, "-r/--reset")
-    args.irq = str_to_address(parser, args.irq, "-i/--irq")
+    def str_to_address_or_name(s):
+        """Returns int for a parseable hex number, otherwise the string (asset name)."""
+        if s:
+            try:
+                return ROM.parse_int(s)
+            except ValueError:
+                return s
+        return None
 
     # Open console and extend error with a hint about the config file
     if args.command in ["term", "run", "upload", "basic"]:
@@ -896,19 +933,27 @@ def exec_args():
         console.terminal(code_page)
 
     if args.command == "run":
-        print(f"[{SCRIPT_FILE}] Loading ROM {args.filename[0]}")
-        rom = ROM()
-        rom.add_rom_file(args.filename[0])
-        if args.reset != None:
-            rom.add_reset_vector(args.reset)
-        print(f"[{SCRIPT_FILE}] Sending ROM")
-        console.send_rom(rom)
         if args.term:
             code_page = console.code_page()
-        if rom.has_reset_vector():
-            console.reset()
+        print(f"[{SCRIPT_FILE}] Reading ROM {args.filename[0]}")
+        rom = ROM()
+        rom.add_rom_file(args.filename[0])
+        if rom.has_assets():
+            print(f"[{SCRIPT_FILE}] Uploading ROM (assets detected)")
+            with open(args.filename[0], "rb") as f:
+                console.upload(f, os.path.basename(args.filename[0]))
+            print(f"[{SCRIPT_FILE}] Loading ROM")
+            console.serial.write(
+                f"LOAD {os.path.basename(args.filename[0])}\r".encode("ascii")
+            )
+            console.serial.read_until()
         else:
-            print(f"[{SCRIPT_FILE}] No reset vector")
+            print(f"[{SCRIPT_FILE}] Sending ROM")
+            console.send_rom(rom)
+            if rom.has_reset_vector():
+                console.reset()
+            else:
+                print(f"[{SCRIPT_FILE}] No reset vector")
         if args.term:
             console.terminal(code_page)
 
@@ -946,38 +991,52 @@ def exec_args():
             console.terminal(code_page)
 
     if args.command == "create":
-        if args.out == None:
-            parser.error(f"argument -o required")
-        if args.address == None:
-            parser.error(f"argument -a/--address required")
+        args.address = str_to_address_or_name(args.address)
+        args.nmi = str_to_address(parser, args.nmi, "-n/--nmi")
+        args.reset = str_to_address(parser, args.reset, "-r/--reset")
+        args.irq = str_to_address(parser, args.irq, "-i/--irq")
         print(f"[{os.path.basename(__file__)}] Creating {args.out}")
         rom = ROM()
         print(f"[{os.path.basename(__file__)}] Adding binary asset {args.filename[0]}")
-        rom.add_binary_file(
-            args.filename[0],
-            data=args.address,
-            nmi=args.nmi,
-            reset=args.reset,
-            irq=args.irq,
-        )
+        if isinstance(args.address, str):
+            with open(args.filename[0], "rb") as f:
+                rom.add_asset(args.address, f.read())
+        else:
+            rom.add_binary_file(
+                args.filename[0],
+                data=args.address,
+                nmi=args.nmi,
+                reset=args.reset,
+                irq=args.irq,
+            )
         for file in args.filename[1:]:
             print(f"[{os.path.basename(__file__)}] Adding ROM asset {file}")
             rom.add_rom_file(file)
         with open(args.out, "wb+") as file:
-            file.write(f"#!{SCRIPT_NAME}\n".encode("ascii"))
-            for help in rom.help:
-                file.write(bytes(f"# {help}\n", "ascii"))
+            file.write(f"#!{SCRIPT_NAME}\r\n".encode("ascii"))
+            # Build null asset (memory chunks blob)
+            chunks = b""
             addr, data = rom.next_rom_data(0)
-            while data != None:
-                file.write(
-                    bytes(
-                        f"${addr:04X} ${len(data):03X} ${binascii.crc32(data):08X}\n",
-                        "ascii",
-                    )
-                )
-                file.write(data)
+            while data is not None:
+                header = f"${addr:04X} ${len(data):03X} ${binascii.crc32(data):08X}\r\n"
+                chunks += header.encode("ascii") + bytes(data)
                 addr += len(data)
                 addr, data = rom.next_rom_data(addr)
+            if chunks:
+                file.write(
+                    f"#>${len(chunks):08X} ${binascii.crc32(chunks):08X}\r\n".encode(
+                        "ascii"
+                    )
+                )
+                file.write(chunks)
+            # Write named assets
+            for asset_name, asset_data in rom.assets:
+                file.write(
+                    f"#>${len(asset_data):08X} ${binascii.crc32(asset_data):08X} {asset_name}\r\n".encode(
+                        "ascii"
+                    )
+                )
+                file.write(asset_data)
 
 
 # This file may be included or run like a program.
@@ -989,10 +1048,12 @@ if __name__ == "__main__":
     # It's annoying when a debugger catches them so we intercept to exit cleanly.
     try:
         exec_args()
-    except (ROMException, FileNotFoundError) as e:
-        error_msg = str(e)
+    except (ROMException, FileNotFoundError, TimeoutError, RuntimeError) as e:
         # Unresolved variable substitutions like ${command:cmake.launchTargetPath}
-        if re.search(r"\$\{[^}]*\}", error_msg):
-            print(f"[{os.path.basename(__file__)}] Check build for failures")
-        print(error_msg)
+        if re.search(r"\$\{[^}]*\}", str(e)):
+            print(
+                f"[{os.path.basename(__file__)}] Check build for failures",
+                file=sys.stderr,
+            )
+        print(f"[{os.path.basename(__file__)}] {e}", file=sys.stderr)
         os._exit(1)  # special exit without raising
