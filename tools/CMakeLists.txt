@@ -138,9 +138,11 @@ function(rp6502_asset name addr in_file)
         -o "${out_file}"
         create "${src_file}"
     )
+    get_filename_component(out_dir "${out_file}" DIRECTORY)
     add_custom_command(
         OUTPUT "${out_file}"
         DEPENDS "${src_file}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${out_dir}"
         COMMAND ${asset_command}
     )
     target_sources(${name} PRIVATE "${out_file}")
