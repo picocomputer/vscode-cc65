@@ -109,6 +109,8 @@ function(rp6502_executable name)
     set_property(TARGET ${name} APPEND PROPERTY
         LINK_DEPENDS ${all_extra_roms}
     )
+    # Mark that rp6502_executable has been called for this target
+    set_property(TARGET ${name} PROPERTY RP6502_EXECUTABLE_CALLED TRUE)
 endfunction()
 
 # Package anything in RP6502 ROM.
@@ -124,6 +126,13 @@ endfunction()
 # with "ROM:filename" from a micro filesystem in the ROM.
 #
 function(rp6502_asset name addr in_file)
+    # Check if rp6502_executable has already been called
+    get_target_property(executable_called ${name} RP6502_EXECUTABLE_CALLED)
+    if (executable_called)
+        message(FATAL_ERROR 
+            "rp6502_asset(${name} ...) must be registered BEFORE calling rp6502_executable()."
+        )
+    endif()
     get_filename_component(src_file "${in_file}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
     file(RELATIVE_PATH rel_path "${CMAKE_SOURCE_DIR}" "${src_file}")
     if (rel_path MATCHES "^\\.\\.")

@@ -912,8 +912,10 @@ def exec_args():
                 parser.error(f"argument {errmsg}: invalid address: '{s}'")
 
     def str_to_address_or_name(s):
-        """Returns int for a parseable hex number, otherwise the string (asset name)."""
+        """Returns int for a parseable hex number, True for 'file', string for asset name."""
         if s:
+            if s.lower() == "file":
+                return True
             try:
                 return ROM.parse_int(s)
             except ValueError:
