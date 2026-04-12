@@ -18,6 +18,7 @@ import sys
 import select
 import ctypes
 import json
+import glob
 from typing import Union
 
 # POSIX
@@ -256,11 +257,16 @@ class SerialPort:
         """Send a break signal."""
         duration = 0.1  # works down to 300bps
         if self._is_posix:
+            if platform.system() == "Darwin":
+                TIOCSBRK, TIOCCBRK = 0x2000747B, 0x2000747A
+            else:
+                TIOCSBRK, TIOCCBRK = 0x5427, 0x5428
             try:
-                fcntl.ioctl(self._fd, 0x5427)  # TIOCSBRK
+                fcntl.ioctl(self._fd, TIOCSBRK)
                 time.sleep(duration)
-            finally:
-                fcntl.ioctl(self._fd, 0x5428)  # TIOCCBRK
+                fcntl.ioctl(self._fd, TIOCCBRK)
+            except Exception:
+                termios.tcsendbreak(self._fd, 0)
         else:
             try:
                 kernel32.EscapeCommFunction(self._handle, 8)  # SETBREAK
@@ -292,6 +298,9 @@ class Console:
         if platform.system() == "Windows":
             return "COM1"
         elif platform.system() == "Darwin":
+            devices = sorted(glob.glob("/dev/cu.usbmodem*"))
+            if devices:
+                return devices[0]
             return "/dev/cu.usbmodem"
         elif platform.system() == "Linux":
             return "/dev/ttyACM0"
