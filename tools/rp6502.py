@@ -19,6 +19,7 @@ import select
 import ctypes
 import json
 import glob
+import socket
 from typing import Union
 
 # POSIX
@@ -45,7 +46,7 @@ SCRIPT_NAME = os.path.splitext(SCRIPT_FILE)[0].upper()
 RESPONSE_TIMEOUT = 2.0
 
 
-class SerialPort:
+class SerialDevice:
     """Cross-platform serial port implementation."""
 
     def __init__(self, port: str):
@@ -290,6 +291,262 @@ class SerialPort:
             self._handle = None
 
 
+class TelnetDevice:
+    """Telnet connection per RFC 854/855 with Q-method (RFC 1143) negotiation."""
+
+    # IAC and commands (RFC 854)
+    IAC = 0xFF
+    DONT = 0xFE
+    DO = 0xFD
+    WONT = 0xFC
+    WILL = 0xFB
+    SB = 0xFA
+    SE = 0xF0
+    BRK = 0xF3
+    # Options (RFC 856 binary transmission)
+    BINARY = 0x00
+
+    # Q-method states. We never initiate disable, so WANT_NO is unused.
+    _NO, _YES, _WANT_YES = 0, 1, 2
+
+    def __init__(self, host: str, port: int, key: str):
+        self._host = host
+        self._port = port
+        self._key = key
+        self._sock = None
+        self._read_buf = b""
+        self._iac_pending = b""
+        # Per-option negotiation state: opt -> [us, him]
+        self._opts = {}
+
+    # --- low-level send ---
+
+    def _send_raw(self, data: bytes):
+        """Send raw bytes, waiting on backpressure via select."""
+        total = 0
+        while total < len(data):
+            try:
+                total += self._sock.send(data[total:])
+            except BlockingIOError:
+                select.select([], [self._sock], [])
+
+    def _send_iac(self, *parts: int):
+        """Send IAC followed by one or more command bytes."""
+        self._send_raw(bytes((self.IAC, *parts)))
+
+    # --- option negotiation (RFC 1143 Q-method) ---
+
+    def _want(self, opt: int) -> bool:
+        """Policy: which options we accept on either side."""
+        return opt == self.BINARY
+
+    def _opt(self, opt: int) -> list:
+        if opt not in self._opts:
+            self._opts[opt] = [self._NO, self._NO]
+        return self._opts[opt]
+
+    def _offer_will(self, opt: int):
+        """Request to enable `opt` on our side."""
+        s = self._opt(opt)
+        if s[0] == self._NO:
+            s[0] = self._WANT_YES
+            self._send_iac(self.WILL, opt)
+
+    def _offer_do(self, opt: int):
+        """Request to enable `opt` on peer's side."""
+        s = self._opt(opt)
+        if s[1] == self._NO:
+            s[1] = self._WANT_YES
+            self._send_iac(self.DO, opt)
+
+    def _recv_do(self, opt: int):
+        s = self._opt(opt)
+        if s[0] == self._NO:
+            if self._want(opt):
+                s[0] = self._YES
+                self._send_iac(self.WILL, opt)
+            else:
+                self._send_iac(self.WONT, opt)
+        elif s[0] == self._WANT_YES:
+            s[0] = self._YES
+
+    def _recv_dont(self, opt: int):
+        s = self._opt(opt)
+        if s[0] == self._YES:
+            s[0] = self._NO
+            self._send_iac(self.WONT, opt)
+        elif s[0] == self._WANT_YES:
+            s[0] = self._NO
+
+    def _recv_will(self, opt: int):
+        s = self._opt(opt)
+        if s[1] == self._NO:
+            if self._want(opt):
+                s[1] = self._YES
+                self._send_iac(self.DO, opt)
+            else:
+                self._send_iac(self.DONT, opt)
+        elif s[1] == self._WANT_YES:
+            s[1] = self._YES
+
+    def _recv_wont(self, opt: int):
+        s = self._opt(opt)
+        if s[1] == self._YES:
+            s[1] = self._NO
+            self._send_iac(self.DONT, opt)
+        elif s[1] == self._WANT_YES:
+            s[1] = self._NO
+
+    # --- IAC scanner ---
+
+    def _strip_iac(self, data: bytes) -> bytes:
+        """Extract user data from incoming bytes, handling telnet commands."""
+        data = self._iac_pending + data
+        self._iac_pending = b""
+        out = bytearray()
+        negotiators = {
+            self.DO: self._recv_do,
+            self.DONT: self._recv_dont,
+            self.WILL: self._recv_will,
+            self.WONT: self._recv_wont,
+        }
+        i, n = 0, len(data)
+        while i < n:
+            if data[i] != self.IAC:
+                out.append(data[i])
+                i += 1
+                continue
+            if i + 1 >= n:
+                self._iac_pending = data[i:]
+                break
+            cmd = data[i + 1]
+            if cmd == self.IAC:
+                # IAC IAC = literal 0xFF
+                out.append(0xFF)
+                i += 2
+            elif cmd in negotiators:
+                if i + 2 >= n:
+                    self._iac_pending = data[i:]
+                    break
+                negotiators[cmd](data[i + 2])
+                i += 3
+            elif cmd == self.SB:
+                # IAC SB ... IAC SE -- skip subnegotiation payload
+                j = i + 2
+                while j + 1 < n:
+                    if data[j] == self.IAC:
+                        if data[j + 1] == self.SE:
+                            j += 2
+                            break
+                        j += 2  # IAC IAC = escaped 0xFF inside subneg
+                    else:
+                        j += 1
+                else:
+                    self._iac_pending = data[i:]
+                    break
+                i = j
+            else:
+                # 2-byte commands without option (NOP, DM, BRK, IP, AO, AYT, EC, EL, GA, SE)
+                i += 2
+        return bytes(out)
+
+    # --- connection lifecycle ---
+
+    def open(self):
+        """Connect and perform passkey login."""
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self._sock.settimeout(RESPONSE_TIMEOUT)
+        try:
+            self._sock.connect((self._host, self._port))
+            # Request BINARY transmission on both sides (RFC 856)
+            # while still in blocking mode so the offers get out promptly.
+            self._offer_will(self.BINARY)
+            self._offer_do(self.BINARY)
+            self._sock.setblocking(False)
+            self.read_until(b":")
+            self.write(self._key.encode("ascii") + b"\r\n")
+            self.read_until(b"\n")  # passkey echo
+            response = self.read_until(b"\n").decode("ascii", errors="replace").strip()
+            if response.startswith("?"):
+                raise RuntimeError(response)
+        except Exception:
+            self._sock.close()
+            self._sock = None
+            raise
+
+    # --- public I/O ---
+
+    def write(self, data: bytes):
+        """Write data, escaping IAC (0xFF) per telnet spec."""
+        self._send_raw(data.replace(b"\xff", b"\xff\xff"))
+
+    def read(self, size: int = 1) -> bytes:
+        """Read up to `size` bytes; times out after RESPONSE_TIMEOUT of silence."""
+        deadline = time.monotonic() + RESPONSE_TIMEOUT
+        while len(self._read_buf) < size:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                # Only recv what we still need so fileno() readiness stays in
+                # sync with _read_buf -- callers select() on us for terminals.
+                chunk = self._sock.recv(size - len(self._read_buf))
+                if not chunk:
+                    break  # peer closed
+                self._read_buf += self._strip_iac(chunk)
+                deadline = time.monotonic() + RESPONSE_TIMEOUT
+            except BlockingIOError:
+                ready, _, _ = select.select([self._sock], [], [], remaining)
+                if not ready:
+                    break
+            except OSError:
+                break
+        result = self._read_buf[:size]
+        self._read_buf = self._read_buf[size:]
+        return result
+
+    def read_until(self, delimiter: bytes = b"\n") -> bytes:
+        """Read until delimiter is found or timeout occurs."""
+        start = time.monotonic()
+        buffer = b""
+        while True:
+            if delimiter in buffer:
+                return buffer
+            if time.monotonic() - start > RESPONSE_TIMEOUT:
+                return buffer
+            chunk = self.read(1)
+            if chunk:
+                buffer += chunk
+            else:
+                time.sleep(0.001)
+
+    def flush_read_bufs(self):
+        """Discard all pending input data."""
+        self._read_buf = b""
+        self._iac_pending = b""
+        while True:
+            try:
+                if not self._sock.recv(4096):
+                    break
+            except (BlockingIOError, OSError):
+                break
+
+    def send_break(self):
+        """Send telnet BREAK (RFC 854)."""
+        self._send_iac(self.BRK)
+
+    def fileno(self) -> int:
+        """Return the socket file descriptor for select()."""
+        return self._sock.fileno()
+
+    def close(self):
+        """Close the telnet connection."""
+        if self._sock is not None:
+            self._sock.close()
+            self._sock = None
+
+
 class Console:
     """Manages the RIA console over a serial connection."""
 
@@ -307,9 +564,9 @@ class Console:
         else:
             return "/dev/tty"
 
-    def __init__(self, name):
-        """Initialize console over serial connection."""
-        self.serial = SerialPort(name)
+    def __init__(self, port):
+        """Initialize console over serial or telnet connection."""
+        self.serial = port
         self.serial.open()
 
     def code_page(self, timeout: float = RESPONSE_TIMEOUT) -> str:
@@ -871,7 +1128,7 @@ def exec_args():
         dest="device",
         metavar="dev",
         default=Console.default_device(),
-        help=f"Serial device name. Default={Console.default_device()}",
+        help=f"Serial device or telnet address:port. Default={Console.default_device()}",
     )
     parser.add_argument(
         # Hidden alias for anyone used to minicom -D /dev/
@@ -882,12 +1139,12 @@ def exec_args():
         help=argparse.SUPPRESS,
     )
     parser.add_argument(
-        "-t",
-        "--term",
-        dest="term",
-        metavar="bool",
-        default="True",
-        help=f"Attach to console terminal on run.",
+        "-k",
+        "--key",
+        dest="key",
+        metavar="key",
+        default=None,
+        help="Passkey for telnet authentication. Device becomes telnet host.",
     )
     parser.add_argument(
         "-w",
@@ -897,6 +1154,14 @@ def exec_args():
         default=None,
         help="Remote directory to work in.",
     )
+    parser.add_argument(
+        "-t",
+        "--term",
+        dest="term",
+        metavar="bool",
+        default="True",
+        help=f"Attach to console terminal on run.",
+    )
     args = parser.parse_args()
 
     # Standard library configuration parser
@@ -905,8 +1170,9 @@ def exec_args():
         if not os.path.exists(args.config):
             config[SCRIPT_NAME] = {
                 "device": args.device,
-                "term": args.term,
+                "key": args.key or "",
                 "workdir": args.workdir or "",
+                "term": args.term,
             }
             with open(args.config, "w") as cfg:
                 config.write(cfg)
@@ -916,6 +1182,7 @@ def exec_args():
             args.device = config[SCRIPT_NAME].get("device", args.device)
             args.term = config[SCRIPT_NAME].get("term", args.term)
             args.workdir = config[SCRIPT_NAME].get("workdir", "") or None
+            args.key = config[SCRIPT_NAME].get("key", "") or args.key or None
 
     # Because parser is bad at bool
     if args.term.lower() in ["t", "true"] or (args.term.isdigit() and args.term != "0"):
@@ -945,12 +1212,37 @@ def exec_args():
                 return s
         return None
 
+    def timed_upload(console, file, name):
+        """Upload with timing and throughput logging."""
+        file.seek(0)
+        total_bytes = file.seek(0, 2)
+        file.seek(0)
+        start = time.monotonic()
+        console.upload(file, name)
+        elapsed = time.monotonic() - start
+        if elapsed > 0:
+            rate = total_bytes / elapsed
+            print(
+                f"[{SCRIPT_FILE}] {total_bytes} bytes in {elapsed:.2f}s ({rate:.0f} bytes/s)"
+            )
+
     # Open console and extend error with a hint about the config file
     if args.command in ["term", "run", "upload", "basic"]:
         if args.config:
             print(f"[{SCRIPT_FILE}] Using device config in {args.config}")
-        print(f"[{SCRIPT_FILE}] Opening device {args.device}")
-        console = Console(args.device)
+        if args.key:
+            host, _, port_str = args.device.rpartition(":")
+            if host and port_str.isdigit():
+                port_num = int(port_str)
+            else:
+                host = args.device
+                port_num = 23
+            print(f"[{SCRIPT_FILE}] Connecting to {host}:{port_num}")
+            transport = TelnetDevice(host, port_num, args.key)
+        else:
+            print(f"[{SCRIPT_FILE}] Opening device {args.device}")
+            transport = SerialDevice(args.device)
+        console = Console(transport)
         console.send_break()
         if args.workdir:
             console.command(f"CD {json.dumps(args.workdir)}")
@@ -967,7 +1259,7 @@ def exec_args():
         rom.add_rom_file(args.filename[0])
         print(f"[{SCRIPT_FILE}] Uploading ROM")
         with open(args.filename[0], "rb") as f:
-            console.upload(f, os.path.basename(args.filename[0]))
+            timed_upload(console, f, os.path.basename(args.filename[0]))
         print(f"[{SCRIPT_FILE}] Loading ROM")
         console.load(os.path.basename(args.filename[0]))
         if args.term:
@@ -981,7 +1273,7 @@ def exec_args():
                     dest = args.out
                 else:
                     dest = os.path.basename(file)
-                console.upload(f, dest)
+                timed_upload(console, f, dest)
 
     if args.command == "basic":
         code_page = console.code_page()
@@ -1064,7 +1356,14 @@ if __name__ == "__main__":
     # It's annoying when a debugger catches them so we intercept to exit cleanly.
     try:
         exec_args()
-    except (ROMException, FileNotFoundError, TimeoutError, RuntimeError) as e:
+    except (
+        ROMException,
+        FileNotFoundError,
+        TimeoutError,
+        RuntimeError,
+        ConnectionError,
+        socket.gaierror,
+    ) as e:
         # Unresolved variable substitutions like ${command:cmake.launchTargetPath}
         if re.search(r"\$\{[^}]*\}", str(e)):
             print(
