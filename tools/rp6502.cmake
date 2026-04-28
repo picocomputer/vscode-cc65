@@ -1,5 +1,10 @@
-# CMake cc65 toolchain file.
 cmake_minimum_required(VERSION 3.20)
+
+# Defines added so IntelliSense can parse cc65; cl65 must not see them.
+set(CC65_INTELLISENSE_ONLY_DEFINES __fastcall__ __cdecl__)
+
+# Skip toolchain config when invoked as a `cmake -P` wrapper script.
+if(NOT CMAKE_SCRIPT_MODE_FILE)
 
 # Select the target system.
 set(CC65_SYSTEM_TARGET rp6502)
@@ -40,19 +45,23 @@ include_directories(BEFORE SYSTEM ${CC65_SYSTEM_INCLUDE_DIR})
 
 # Evil hack to get IntelliSense and problem matchers working by wrapping cl65.
 # Comment out these lines to completely disable hack.
-add_compile_options("$<$<COMPILE_LANGUAGE:C>:SHELL:-D__fastcall__=>")
-add_compile_options("$<$<COMPILE_LANGUAGE:C>:SHELL:-D__cdecl__=>")
+foreach(NAME IN LISTS CC65_INTELLISENSE_ONLY_DEFINES)
+    add_compile_options("$<$<COMPILE_LANGUAGE:C>:SHELL:-D${NAME}=>")
+endforeach()
 if(CC65_DEFINE_TARGET)
     add_compile_options("$<$<COMPILE_LANGUAGE:C>:SHELL:-D${CC65_DEFINE_TARGET}=>")
 endif()
 set(CMAKE_C_COMPILER ${CMAKE_COMMAND})
-set(CMAKE_C_COMPILER_ARG1 "-P ${CMAKE_CURRENT_LIST_DIR}/cc65.cmake -- ${CC65_C_COMPILER}")
+set(CMAKE_C_COMPILER_ARG1 "-P ${CMAKE_CURRENT_LIST_FILE} -- ${CC65_C_COMPILER}")
 set(CC65_ASM_COMPILER "${CMAKE_ASM_COMPILER}" CACHE FILEPATH "Real cc65 ASM compiler")
 set(CMAKE_ASM_COMPILER ${CMAKE_COMMAND})
-set(CMAKE_ASM_COMPILER_ARG1 "-P ${CMAKE_CURRENT_LIST_DIR}/cc65.cmake -- ${CC65_ASM_COMPILER}")
+set(CMAKE_ASM_COMPILER_ARG1 "-P ${CMAKE_CURRENT_LIST_FILE} -- ${CC65_ASM_COMPILER}")
 
 # Set C internals to work with cc65.
 set(CMAKE_C_COMPILER_ID "cc65" CACHE STRING "C compiler ID")
+set(CMAKE_C_DEPFILE_FORMAT gcc)
+set(CMAKE_C_DEPENDS_USE_COMPILER TRUE)
+set(CMAKE_DEPFILE_FLAGS_C "--create-dep <DEP_FILE>")
 set(CMAKE_C_COMPILE_OBJECT "<CMAKE_C_COMPILER> <DEFINES> <INCLUDES> <FLAGS> -o <OBJECT> --add-source -l <OBJECT>.s -c <SOURCE>")
 set(CMAKE_C_CREATE_STATIC_LIBRARY "<CMAKE_AR> a <TARGET> <LINK_FLAGS> <OBJECTS>")
 set(CMAKE_C_FLAGS "--target ${CC65_SYSTEM_TARGET}" CACHE STRING "cc65 C flags")
@@ -63,7 +72,10 @@ set(CMAKE_C_COMPILER_FORCED TRUE)
 
 # Set ASM internals to work with cc65.
 set(CMAKE_ASM_COMPILER_ID "cc65" CACHE STRING "ASM compiler ID")
-set(CMAKE_INCLUDE_FLAG_ASM "-I ")
+set(CMAKE_INCLUDE_FLAG_ASM "--asm-include-dir ")
+set(CMAKE_ASM_DEPFILE_FORMAT gcc)
+set(CMAKE_ASM_DEPENDS_USE_COMPILER TRUE)
+set(CMAKE_DEPFILE_FLAGS_ASM "--create-dep <DEP_FILE>")
 set(CMAKE_ASM_COMPILE_OBJECT "<CMAKE_ASM_COMPILER> <DEFINES> <INCLUDES> <FLAGS> -o <OBJECT> -c <SOURCE>")
 set(CMAKE_ASM_CREATE_STATIC_LIBRARY ${CMAKE_C_CREATE_STATIC_LIBRARY})
 set(CMAKE_ASM_FLAGS "--target ${CC65_SYSTEM_TARGET}" CACHE STRING "cc65 ASM flags")
@@ -74,3 +86,54 @@ set(CMAKE_ASM_LINKER_PREFERENCE 0)
 set(CMAKE_ASM_LINKER_PREFERENCE_PROPAGATES 0)
 set(CMAKE_ASM_INFORMATION_LOADED 1)
 set(CMAKE_ASM_COMPILER_FORCED TRUE)
+
+return()
+endif() # End toolchain config
+
+# Wrapper mode for IntelliSense and problem matchers.
+# Args 0-3 are the cmake call to this script.
+if(NOT CMAKE_ARGV3 STREQUAL "--")
+    message(FATAL_ERROR "No -- separator found in arguments")
+endif()
+
+# First argument after -- is the real compiler.
+set(CC65_COMPILER "${CMAKE_ARGV4}")
+
+set(SKIP_ARGS "")
+foreach(NAME IN LISTS CC65_INTELLISENSE_ONLY_DEFINES)
+    list(APPEND SKIP_ARGS "-D${NAME}=")
+endforeach()
+
+# Remove defines intended for IntelliSense.
+set(FILTERED_ARGS "")
+foreach(INDEX RANGE 5 ${CMAKE_ARGC})
+    if(DEFINED CMAKE_ARGV${INDEX})
+        set(ARG "${CMAKE_ARGV${INDEX}}")
+        if(NOT ARG IN_LIST SKIP_ARGS)
+            list(APPEND FILTERED_ARGS "${ARG}")
+        endif()
+    endif()
+endforeach()
+
+# Execute the real compiler with filtered arguments.
+execute_process(
+    COMMAND ${CC65_COMPILER} ${FILTERED_ARGS}
+    OUTPUT_VARIABLE STDOUT_OUTPUT
+    ERROR_VARIABLE STDERR_OUTPUT
+    RESULT_VARIABLE EXIT_CODE
+)
+
+if(STDOUT_OUTPUT)
+    message(STATUS "${STDOUT_OUTPUT}")
+endif()
+
+if(STDERR_OUTPUT)
+    # Reformat stderr so VS Code problem matcher works. Just a case change.
+    string(REGEX REPLACE "(:[0-9]+:) Error:" "\\1 error:" STDERR_OUTPUT "${STDERR_OUTPUT}")
+    string(REGEX REPLACE "(:[0-9]+:) Warning:" "\\1 warning:" STDERR_OUTPUT "${STDERR_OUTPUT}")
+    message(NOTICE "${STDERR_OUTPUT}")
+endif()
+
+if(NOT EXIT_CODE EQUAL 0)
+    message(FATAL_ERROR "Compilation failed with exit code ${EXIT_CODE}")
+endif()
