@@ -821,6 +821,7 @@ class Console:
                 break
             command = f"${len(chunk):03X} ${binascii.crc32(chunk):08X}\r"
             self.serial.write(bytes(command, "ascii"))
+            self.serial.read_until(b"\n")
             self.serial.write(chunk)
             self.wait_for_prompt("}")
         self.serial.write(b"END\r")
@@ -1305,19 +1306,40 @@ def exec_args():
         args.irq = str_to_address(parser, args.irq, "-i/--irq")
         print(f"[{os.path.basename(__file__)}] Creating {args.out}")
         rom = ROM()
-        print(f"[{os.path.basename(__file__)}] Adding binary asset {args.filename[0]}")
-        if isinstance(args.address, str):
-            with open(args.filename[0], "rb") as f:
-                rom.add_asset(args.address, f.read())
+        if args.address is None:
+            for vec_value, vec_flag in (
+                (args.nmi, "-n/--nmi"),
+                (args.reset, "-r/--reset"),
+                (args.irq, "-i/--irq"),
+            ):
+                if vec_value is True:
+                    parser.error(
+                        f"argument {vec_flag}: 'file' requires a binary asset (-a)"
+                    )
+            if args.nmi:
+                rom.add_nmi_vector(args.nmi)
+            if args.reset:
+                rom.add_reset_vector(args.reset)
+            if args.irq:
+                rom.add_irq_vector(args.irq)
+            extras_start = 0
         else:
-            rom.add_binary_file(
-                args.filename[0],
-                data=args.address,
-                nmi=args.nmi,
-                reset=args.reset,
-                irq=args.irq,
+            print(
+                f"[{os.path.basename(__file__)}] Adding binary asset {args.filename[0]}"
             )
-        for file in args.filename[1:]:
+            if isinstance(args.address, str):
+                with open(args.filename[0], "rb") as f:
+                    rom.add_asset(args.address, f.read())
+            else:
+                rom.add_binary_file(
+                    args.filename[0],
+                    data=args.address,
+                    nmi=args.nmi,
+                    reset=args.reset,
+                    irq=args.irq,
+                )
+            extras_start = 1
+        for file in args.filename[extras_start:]:
             print(f"[{os.path.basename(__file__)}] Adding ROM asset {file}")
             rom.add_rom_file(file)
         with open(args.out, "wb+") as file:
