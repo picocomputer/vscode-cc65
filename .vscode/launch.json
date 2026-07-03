@@ -1,8 +1,27 @@
 {
+    // Two ways to "Start Debugging" (F5):
+    //   RP6502 (Emulator) — source-level debug in rp6502 emulator.
+    //   RP6502 (Hardware) — upload + run on a real Picocomputer.
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "RP6502",
+            "name": "RP6502 (Emulator)",
+            "type": "lldb-dap",
+            "request": "launch",
+            "debugAdapterExecutable": "${command:python.interpreterPath}",
+            "debugAdapterArgs": [
+                "${workspaceFolder}/tools/rp6502.py",
+                "-c",
+                "${workspaceFolder}/.rp6502",
+                "emu"
+            ],
+            "program": "${command:cmake.launchTargetPath}.rp6502",
+            "dbg": "${command:cmake.launchTargetPath}.dbg",
+            "stopOnEntry": false,
+            "stopOnExit": true
+        },
+        {
+            "name": "RP6502 (Hardware)",
             "type": "debugpy",
             "request": "launch",
             "console": "integratedTerminal",
