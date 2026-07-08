@@ -22,6 +22,7 @@ import glob
 import shlex
 import shutil
 import socket
+import subprocess
 from typing import Union
 
 # POSIX
@@ -1111,12 +1112,10 @@ class Emulator:
                 found = None  # bizarre PATH/PATHEXT; keep scanning
             if found:
                 candidates.append(found)
-            # Build-tree layouts for `rp6502` repo checkouts. Plain covers
-            # single-config generators; Release/Debug cover multi-config.
+            # Build-tree layouts for `rp6502` repo checkouts.
             build_subdirs = (
-                os.path.join("build", "emulator"),
-                os.path.join("build", "emulator", "Release"),
-                os.path.join("build", "emulator", "Debug"),
+                os.path.join("build", "emulator", "release"),
+                os.path.join("build", "emulator", "debug"),
             )
             src_roots = ("~", "~/src", "~/Projects", "~/projects", "~/dev", "~/git")
             for root in src_roots:
@@ -1624,10 +1623,9 @@ def exec_args():
             cmd += ["--"] + rom_args
         # Status to stderr only: stdout carries the lldb-dap DAP stream.
         print(f"[{SCRIPT_FILE}] Launching {emulator}", file=sys.stderr)
-        # Replace this process with the emulator so there is no middleman to
-        # leave the emulator orphaned when the IDE stops the debug session.
-        # Our stdio (the DAP stream) carries straight over the exec.
         try:
+            if os.name == "nt":
+                sys.exit(subprocess.Popen(cmd).wait())
             os.execvp(cmd[0], cmd)
         except OSError as e:
             # Backstop for exec failures on a path shutil.which deemed runnable.

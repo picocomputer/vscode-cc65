@@ -8,13 +8,25 @@
             "name": "RP6502 (Emulator)",
             "type": "lldb-dap",
             "request": "launch",
-            "debugAdapterExecutable": "${command:python.interpreterPath}",
+            "debugAdapterExecutable": "/usr/bin/env",
             "debugAdapterArgs": [
+                "python3",
                 "${workspaceFolder}/tools/rp6502.py",
                 "-c",
                 "${workspaceFolder}/.rp6502",
                 "emu"
             ],
+            "windows": {
+                "debugAdapterExecutable": "${env:ComSpec}",
+                "debugAdapterArgs": [
+                    "/c",
+                    "python",
+                    "${workspaceFolder}\\tools\\rp6502.py",
+                    "-c",
+                    "${workspaceFolder}\\.rp6502",
+                    "emu"
+                ]
+            },
             "program": "${command:cmake.launchTargetPath}.rp6502",
             "dbg": "${command:cmake.launchTargetPath}.dbg",
             "stopOnEntry": false,

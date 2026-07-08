@@ -4,26 +4,32 @@
         {
             "label": "RP6502: upload ROM",
             "type": "shell",
-            "command": [
-                "python3",
+            "command": "python3",
+            "args": [
                 "${workspaceFolder}/tools/rp6502.py",
                 "-c",
                 "${workspaceFolder}/.rp6502",
                 "upload",
                 "${command:cmake.launchTargetPath}.rp6502"
             ],
+            "windows": {
+                "command": "python"
+            },
             "problemMatcher": []
         },
         {
             "label": "RP6502: console terminal",
             "type": "shell",
-            "command": [
-                "python3",
+            "command": "python3",
+            "args": [
                 "${workspaceFolder}/tools/rp6502.py",
                 "-c",
                 "${workspaceFolder}/.rp6502",
                 "term"
             ],
+            "windows": {
+                "command": "python"
+            },
             "presentation": {
                 "panel": "dedicated",
                 "reveal": "always"
