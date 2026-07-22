@@ -1101,40 +1101,41 @@ class Emulator:
     @staticmethod
     def find():
         """Locate the rp6502-emu executable for first-run config hinting."""
-        is_windows = platform.system() == "Windows"
-        exe = "rp6502-emu.exe" if is_windows else "rp6502-emu"
+        system = platform.system()
+        exe = "rp6502-emu.exe" if system == "Windows" else "rp6502-emu"
         try:
             candidates = []
-            # Anything already on PATH (a deliberate install).
+            # Anything already on PATH.
             try:
                 found = shutil.which(exe)
             except Exception:
                 found = None  # bizarre PATH/PATHEXT; keep scanning
             if found:
                 candidates.append(found)
-            # Build-tree layouts for `rp6502` repo checkouts.
-            build_subdirs = (
-                os.path.join("build", "emulator", "release"),
-                os.path.join("build", "emulator", "debug"),
-            )
-            src_roots = ("~", "~/src", "~/Projects", "~/projects", "~/dev", "~/git")
-            for root in src_roots:
-                for sub in build_subdirs:
-                    candidates.append(
-                        os.path.expanduser(os.path.join(root, "rp6502", sub, exe))
+            # A source checkout the dev built themselves (~/rp6502).
+            for sub in ("release", "debug"):
+                candidates.append(
+                    os.path.expanduser(
+                        os.path.join("~", "rp6502", "build", "emulator", sub, exe)
                     )
-            # Common install directories.
-            if is_windows:
-                for var in ("ProgramFiles", "LOCALAPPDATA"):
-                    base = os.environ.get(var)
-                    if base:
-                        candidates.append(os.path.join(base, "rp6502", exe))
-            else:
-                for d in (
-                    "~/bin",
-                    "~/.local/bin",
-                ):
-                    candidates.append(os.path.expanduser(os.path.join(d, exe)))
+                )
+            # A downloaded release artifact.
+            for d in ("~", "~/Downloads", "~/Desktop"):
+                base = os.path.expanduser(d)
+                if system == "Darwin":
+                    # macOS ships rp6502-emu.app; run its inner Mach-O.
+                    candidates.append(
+                        os.path.join(
+                            base, "rp6502-emu.app", "Contents", "MacOS", "rp6502-emu"
+                        )
+                    )
+                else:
+                    candidates.append(os.path.join(base, exe))
+                    # Linux release binaries are arch-suffixed.
+                    if system == "Linux":
+                        candidates.append(
+                            os.path.join(base, f"rp6502-emu-{platform.machine()}")
+                        )
             for candidate in candidates:
                 # isfile returns False on OSError/ValueError (3.8+).
                 if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
@@ -1599,6 +1600,11 @@ def exec_args():
                 f"to the rp6502-emu executable path."
             )
         emulator = os.path.expanduser(os.path.expandvars(emulator))
+        # A macOS .app is a directory; run its inner executable.
+        if platform.system() == "Darwin" and emulator.rstrip("/").endswith(".app"):
+            emulator = os.path.join(
+                emulator.rstrip("/"), "Contents", "MacOS", "rp6502-emu"
+            )
         # An explicit path (with a separator) must exist; a bare name is resolved
         # against PATH so we can report "not found on PATH" precisely (rather than
         # a misleading errno from execvp on non-executable PATH entries).
