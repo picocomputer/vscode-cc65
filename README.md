@@ -8,7 +8,7 @@ the one you aren't using.
 ### Linux Tools Install:
  * [VS Code](https://code.visualstudio.com/) - This has its own installer.
  * A source build of [CC65](https://cc65.github.io/getting-started.html).
- * The following tools installed from your package managers:
+ * The following tools installed from your package manager:
     * `sudo apt install cmake python3 git build-essential`
 
 ### Windows Tools Install:
@@ -39,18 +39,28 @@ Install the recommended extensions when VS Code prompts you, choosing the
 default or obvious choice for any other prompts. The tools we use in VS Code
 are constantly improving and have their own documentation. The first problem
 you might encounter is that no kit is configured, so begin by reading this
-and choosing the `[RP6502]` kit:
+and choosing the `[Unspecified]` kit:
 https://code.visualstudio.com/docs/cpp/cmake-linux
 The full documentation for the CMake plugin is here:
 https://github.com/microsoft/vscode-cmake-tools/blob/main/docs/README.md
 
-"Start Debugging" (F5) will build your project and run it on a Picocomputer.
-Connect with a USB cable plugged into the RP6502-VGA USB port.
+"Start Debugging" (F5) offers two launch configurations:
 
-If you get a Python error about the communications device not being found,
-edit `.rp6502` in the project root. This file will be created the first time
-you "Start Debugging" and will be ignored by git. You may also connect over
-telnet by instead providing a hostname for the device and setting the key.
+ * **RP6502 (Emulator)** is the default. It builds your project and runs it with
+   source-level debugging in the rp6502 emulator.
+ * **RP6502 (Hardware)** builds your project and runs it on a Picocomputer 6502.
+   Connect with telnet or a USB cable plugged into the RP6502-VGA USB port.
+
+Both read `.rp6502` in the project root. This file is created the first time you
+"Start Debugging" and is ignored by git.
+
+For the emulator, the `emulator` setting must point to the `rp6502-emu`
+executable (a bare name is searched on your PATH).
+
+For hardware, set `device` to the serial port. If you get a Python error about
+the communications device not being found, edit `device` in `.rp6502`. You may
+also connect over telnet by instead providing a hostname for the device and
+setting the key.
 
 Once the program is running, a debug console becomes available on the terminal
 tab. It will say "Python Debug Console" because the rp6502.py tool is Python.
@@ -58,3 +68,7 @@ Ctrl-A then X will exit. Ctrl-A then B will send a break.
 
 Edit `CMakeLists.txt` to add new source and asset files. From here on, it's
 standard C/assembly development for the 6502 platform.
+
+### Documentation:
+ * [Picocomputer](https://picocomputer.github.io)
+ * [CC65](https://cc65.github.io/)

@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_LIST_DIR}/tools/rp6502.cmake"
+    CACHE FILEPATH "CMake toolchain file")
+
 project(MY-RP6502-PROJECT C ASM)
 
 add_subdirectory(tools)
