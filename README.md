@@ -65,9 +65,9 @@ $ cmake --build --preset cc65/Debug
 
 That leaves a ROM at `build/cc65/debug/hello.rp6502`.
 
-In VS Code, open the folder, install the recommended extensions when prompted,
-and pick the preset from the CMake status bar at the bottom of the window
-instead of typing the commands.
+In VS Code, open the folder and install the recommended extensions when
+prompted. From the CMake side panel, select Configure:cc65/Debug and press
+Build instead of typing the commands.
 
 The first configure fails until a compiler is chosen. If you would rather fix
 the choice in the project than pass it every time, uncomment one line near the
