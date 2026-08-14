@@ -1,7 +1,4 @@
 {
-    // Two ways to "Start Debugging" (F5):
-    //   RP6502 (Emulator) — source-level debug in rp6502 emulator.
-    //   RP6502 (Hardware) — upload + run on a real Picocomputer.
     "version": "0.2.0",
     "configurations": [
         {

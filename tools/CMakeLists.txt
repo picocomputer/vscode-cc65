@@ -1,7 +1,6 @@
-# Fetches the RP6502 project tools from picocomputer/rp6502, then replaces
-# itself with the full version, which carries the rp6502_* build commands and
-# this same fetch. The tools are ordinary files in your repository after that;
-# commit them, and an update arrives as a diff you can read.
+# Fetches the RP6502 project tools from picocomputer/rp6502, then
+# replaces itself with the full version. The tools are ordinary
+# files in your repository after that; commit them.
 #
 # Update with:  cmake -P tools/CMakeLists.txt
 
