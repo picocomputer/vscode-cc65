@@ -1,5 +1,4 @@
-.export _init, _exit
-.export __STARTUP__ : absolute = 1
+.export _main
 
 .include "rp6502.inc"
 
@@ -10,12 +9,9 @@ message:
 
 .segment "CODE"
 
-; Entry point
-_init:
-    ; 6502 doesn't reset these
-    ldx #$FF
-    txs
-    cld
+; Entry point. The C runtime has already set the stack pointer and cleared
+; decimal mode, and it halts the 6502 with the status we return.
+_main:
 
 ; Print "Hello, world!" message
     ldx #0
@@ -30,7 +26,7 @@ _init:
     bne @loop           ; Continue loop
 @done:
 
-; Halts the 6502 by pulling RESB low
-_exit:
-    lda #RIA_OP_EXIT
-    sta RIA_OP
+; Exit status
+    lda #0
+    ldx #0
+    rts

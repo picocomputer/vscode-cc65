@@ -2,10 +2,15 @@
 
 Scaffolding for a new Picocomputer 6502 software project. It builds with
 either 6502 compiler, cc65 or llvm-mos, and switching between them is one
-setting. Both C and assembly examples of "Hello, world!" are included. Make
-sure `CMakeLists.txt` points to your choice of `main.c` or `main.s`, then
-delete the one you aren't using. The assembly example is ca65 syntax, so it is
-for cc65 only.
+setting. Three "Hello, world!" examples are included to start from:
+
+ * `src/main.c` — C, and builds with either compiler.
+ * `src/main-cc65.s` — assembly for cc65, which uses the ca65 syntax.
+ * `src/main-llvm-mos.s` — the same program in llvm-mos assembly.
+
+Make sure `CMakeLists.txt` points to the one you want, then delete the others.
+The two assembly files pick up where the C runtime leaves off, so they read
+alike; only the assembler directives differ.
 
 ### Requirements:
  * CMake 3.21 or newer
