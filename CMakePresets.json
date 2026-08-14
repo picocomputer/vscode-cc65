@@ -16,7 +16,7 @@
         {
             "name": "cc65/Debug",
             "displayName": "cc65/Debug",
-            "description": "Build with cc65. Debug information, which is what F5 needs to stop on a line of your source.",
+            "description": "Build with cc65. Debug information, needed for source-level debugging.",
             "inherits": "base",
             "binaryDir": "${sourceDir}/build/cc65/debug",
             "cacheVariables": {
@@ -27,7 +27,7 @@
         {
             "name": "cc65/Release",
             "displayName": "cc65/Release",
-            "description": "The same, optimized, for the ROM you hand to someone else.",
+            "description": "The same, optimized, for the ROM you ship.",
             "inherits": "base",
             "binaryDir": "${sourceDir}/build/cc65/release",
             "cacheVariables": {
@@ -38,7 +38,7 @@
         {
             "name": "llvm-mos/Debug",
             "displayName": "llvm-mos/Debug",
-            "description": "Build with llvm-mos. A tree of its own, so changing compilers is a pick and not a wipe.",
+            "description": "Build with llvm-mos. Debug information, needed for source-level debugging.",
             "inherits": "base",
             "binaryDir": "${sourceDir}/build/llvm-mos/debug",
             "cacheVariables": {
@@ -49,7 +49,7 @@
         {
             "name": "llvm-mos/Release",
             "displayName": "llvm-mos/Release",
-            "description": "The same, optimized, for the ROM you hand to someone else.",
+            "description": "The same, optimized, for the ROM you ship.",
             "inherits": "base",
             "binaryDir": "${sourceDir}/build/llvm-mos/release",
             "cacheVariables": {
