@@ -128,8 +128,10 @@ Either way the result is a diff you can read before you commit it.
 
 ### Updating an older project:
 Projects made before this template merged cc65 and llvm-mos have their compiler
-wired into the top of `CMakeLists.txt`. Replace everything above `project()`
-with:
+wired into the top of `CMakeLists.txt`, and a `tools/` that predates any of
+this. Start by copying this template's `tools/CMakeLists.txt` over yours — it
+is the small script that fetches the rest, and it replaces itself on the next
+configure. Then replace everything above `project()` with:
 
 ```cmake
 cmake_minimum_required(VERSION 3.21)
@@ -149,9 +151,10 @@ endif()
 ```
 
 Delete the `add_subdirectory(tools)` line, which the `include()` replaces, and
-copy `CMakePresets.json` from this template if you want the compiler picker.
-Old projects called `rp6502_executable()` with the address their compiler
-happened to use; `DATA default RESET default` works under both.
+`tools/rp6502.cmake`, which is now `tools/cc65.cmake`. Copy
+`CMakePresets.json` from this template if you want the compiler picker. Old
+projects called `rp6502_executable()` with the address their compiler happened
+to use; `DATA default RESET default` works under both.
 
 ### Documentation:
  * [Picocomputer](https://picocomputer.github.io)
