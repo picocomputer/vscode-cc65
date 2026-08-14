@@ -69,17 +69,15 @@ In VS Code, open the folder and install the recommended extensions when
 prompted. From the CMake side panel, select Configure:cc65/Debug and press
 Build instead of typing the commands.
 
-The first configure fails until a compiler is chosen. If you would rather fix
-the choice in the project than pass it every time, uncomment one line near the
-top of `CMakeLists.txt`:
+The first configure fails until a compiler is chosen. If your editor does not
+drive presets, name one on the command line instead:
 
-```cmake
-#set(CC65_TARGET_SYSTEM rp6502)
-#set(LLVM_MOS_PLATFORM rp6502)
+```bash
+$ cmake -B build -DCC65_TARGET_SYSTEM=rp6502 -DCMAKE_BUILD_TYPE=Debug
+$ cmake --build build
 ```
 
-Then a plain `cmake -B build && cmake --build build` works, and so does any
-editor that drives CMake for you.
+`LLVM_MOS_PLATFORM=rp6502` selects the other compiler the same way.
 
 ### Running it:
 `tools/rp6502.py` sends a ROM to a Picocomputer and gives you its console. It
@@ -191,18 +189,13 @@ configure. Then replace everything above `project()` with:
 cmake_minimum_required(VERSION 3.21)
 
 include(${CMAKE_CURRENT_LIST_DIR}/tools/CMakeLists.txt)
-
-#set(CC65_TARGET_SYSTEM rp6502)
-#set(LLVM_MOS_PLATFORM rp6502)
-
-rp6502_require_package()
 ```
 
 Delete the `add_subdirectory(tools)` line, which the `include()` replaces, and
 `tools/rp6502.cmake`, which is now `tools/cc65.cmake`. Copy
-`CMakePresets.json` from this template if you want the compiler presets. Old
-projects called `rp6502_executable()` with the address their compiler happened
-to use; `DATA default RESET default` works under both.
+`CMakePresets.json` from this template as well — that is where the compiler is
+chosen now. Old projects called `rp6502_executable()` with the address their
+compiler happened to use; `DATA default RESET default` works under both.
 
 ### Documentation:
  * [Picocomputer](https://picocomputer.github.io)
