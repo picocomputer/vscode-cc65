@@ -40,17 +40,6 @@ Windows:
    this has already been done - exit Python with Ctrl-Z plus Enter.
  * For VS Code: `winget install -e --id Microsoft.VisualStudioCode`
 
-LLVM-MOS must be in your PATH. However, this may conflict with other LLVM
-installations, like the one that comes with your operating system. In that
-case you can put it first for only this project. From a command line, adjust
-PATH in the shell you build from. In VS Code, add a `cmake.environment`
-setting to `.vscode/settings.json`:
-```json
-    "cmake.environment": {
-        "PATH": "~/llvm-mos/bin:${env:PATH}"
-    },
-```
-
 ### Getting Started:
 Go to the [GitHub template](https://github.com/picocomputer/vscode-cc65) and
 select "Use this template" then "Create a new repository". GitHub will create
@@ -187,7 +176,9 @@ $ cmake -P tools/CMakeLists.txt
 ```
 
 VS Code has this as the "RP6502: update tools" task. Either way the result is
-a diff you can read before you commit it.
+a diff you can read before you commit it. Nothing is fetched behind your back:
+configuring a project that already has its tools never goes to the network,
+and a tool you delete stays deleted.
 
 ### Updating an older project:
 Projects made before this template merged cc65 and llvm-mos have their compiler

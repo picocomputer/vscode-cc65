@@ -10,12 +10,10 @@ cmake_minimum_required(VERSION 3.21)
 # TODO: back to main once the centraltools work is tested.
 set(RP6502_TOOLS_REPO "picocomputer/rp6502")
 set(RP6502_TOOLS_REF "centraltools")
-set(RP6502_TOOLS_FILES CMakeLists.txt cc65-config.cmake cc65.cmake rp6502.py)
+set(RP6502_TOOLS_FILES cc65-config.cmake cc65.cmake rp6502.py CMakeLists.txt)
 
 set(RP6502_TOOLS_DIR "${CMAKE_CURRENT_LIST_DIR}")
 
-# Unconditional: this file exists, so fetching only what is missing would
-# never replace the one file that has to be replaced.
 foreach(name IN LISTS RP6502_TOOLS_FILES)
     set(url "https://raw.githubusercontent.com/${RP6502_TOOLS_REPO}/${RP6502_TOOLS_REF}/tools/${name}")
     set(out "${RP6502_TOOLS_DIR}/${name}")
