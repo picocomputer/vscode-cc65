@@ -7,7 +7,7 @@
             "command": "cmake",
             "args": [
                 "-P",
-                "${workspaceFolder}/tools/CMakeLists.txt"
+                "${workspaceFolder}/tools/rp6502.cmake"
             ],
             "presentation": {
                 "reveal": "always",

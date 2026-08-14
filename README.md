@@ -175,7 +175,7 @@ them along with everything else.
 To pull down the current versions:
 
 ```bash
-$ cmake -P tools/CMakeLists.txt
+$ cmake -P tools/rp6502.cmake
 ```
 
 VS Code has this as the "RP6502: update tools" task. Either way the result is
@@ -186,21 +186,24 @@ and a tool you delete stays deleted.
 ### Updating an older project:
 Projects made before this template merged cc65 and llvm-mos have their compiler
 wired into the top of `CMakeLists.txt`, and a `tools/` that predates any of
-this. Start by copying this template's `tools/CMakeLists.txt` over yours — it
-is the small script that fetches the rest, and it replaces itself on the next
-configure. Then replace everything above `project()` with:
+this. Start by copying this template's `tools/rp6502.cmake` over yours. That
+name used to be the cc65 toolchain file; it is now the small script that
+fetches everything, and the toolchain it replaces comes back as
+`tools/cc65-toolchain.cmake` on the first configure.
+
+Then replace everything above `project()` with:
 
 ```cmake
 cmake_minimum_required(VERSION 3.21)
 
-include(${CMAKE_CURRENT_LIST_DIR}/tools/CMakeLists.txt)
+include(${CMAKE_CURRENT_LIST_DIR}/tools/rp6502.cmake)
 ```
 
-Delete the `add_subdirectory(tools)` line, which the `include()` replaces, and
-`tools/rp6502.cmake`, which is now `tools/cc65-toolchain.cmake`. Copy
-`CMakePresets.json` from this template as well — that is where the compiler is
-chosen now. Old projects called `rp6502_executable()` with the address their
-compiler happened to use; `DATA default RESET default` works under both.
+Delete `tools/CMakeLists.txt` and the `add_subdirectory(tools)` line that
+pulled it in — the `include()` above replaces both. Copy `CMakePresets.json`
+from this template as well; that is where the compiler is chosen now. Old
+projects called `rp6502_executable()` with the address their compiler happened
+to use, and `DATA default RESET default` works under both.
 
 ### Documentation:
  * [Picocomputer](https://picocomputer.github.io)

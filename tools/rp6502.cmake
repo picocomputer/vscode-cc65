@@ -2,7 +2,7 @@
 # replaces itself with the full version. The tools are ordinary
 # files in your repository after that; commit them.
 #
-# Update with:  cmake -P tools/CMakeLists.txt
+# Update with:  cmake -P tools/rp6502.cmake
 
 cmake_minimum_required(VERSION 3.21)
 
@@ -64,4 +64,4 @@ endif()
 
 set(RP6502_TOOLS_FETCHED TRUE)
 set(RP6502_TOOLS_RELOADED TRUE)
-include("${RP6502_TOOLS_DIR}/CMakeLists.txt")
+include("${RP6502_TOOLS_DIR}/rp6502.cmake")

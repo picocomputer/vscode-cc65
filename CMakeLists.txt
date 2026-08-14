@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-include(${CMAKE_CURRENT_LIST_DIR}/tools/CMakeLists.txt)
+include(${CMAKE_CURRENT_LIST_DIR}/tools/rp6502.cmake)
 
 project(MY-RP6502-PROJECT C CXX ASM)
 
