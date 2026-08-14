@@ -1,0 +1,83 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 21,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "cc65/Debug",
+            "displayName": "cc65/Debug",
+            "description": "Build with cc65. Debug information, which is what F5 needs to stop on a line of your source.",
+            "inherits": "base",
+            "binaryDir": "${sourceDir}/build/cc65/debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CC65_TARGET_SYSTEM": "rp6502"
+            }
+        },
+        {
+            "name": "cc65/Release",
+            "displayName": "cc65/Release",
+            "description": "The same, optimized, for the ROM you hand to someone else.",
+            "inherits": "base",
+            "binaryDir": "${sourceDir}/build/cc65/release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CC65_TARGET_SYSTEM": "rp6502"
+            }
+        },
+        {
+            "name": "llvm-mos/Debug",
+            "displayName": "llvm-mos/Debug",
+            "description": "Build with llvm-mos. A tree of its own, so changing compilers is a pick and not a wipe.",
+            "inherits": "base",
+            "binaryDir": "${sourceDir}/build/llvm-mos/debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "LLVM_MOS_PLATFORM": "rp6502"
+            }
+        },
+        {
+            "name": "llvm-mos/Release",
+            "displayName": "llvm-mos/Release",
+            "description": "The same, optimized, for the ROM you hand to someone else.",
+            "inherits": "base",
+            "binaryDir": "${sourceDir}/build/llvm-mos/release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "LLVM_MOS_PLATFORM": "rp6502"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "cc65/Debug",
+            "displayName": "cc65/Debug",
+            "configurePreset": "cc65/Debug"
+        },
+        {
+            "name": "cc65/Release",
+            "displayName": "cc65/Release",
+            "configurePreset": "cc65/Release"
+        },
+        {
+            "name": "llvm-mos/Debug",
+            "displayName": "llvm-mos/Debug",
+            "configurePreset": "llvm-mos/Debug"
+        },
+        {
+            "name": "llvm-mos/Release",
+            "displayName": "llvm-mos/Release",
+            "configurePreset": "llvm-mos/Release"
+        }
+    ]
+}

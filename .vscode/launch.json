@@ -27,8 +27,9 @@
                     "emu"
                 ]
             },
+            // The emulator finds the debug companion beside the ROM, so this
+            // works under either compiler: llvm-mos leaves an .elf, cc65 a .dbg.
             "program": "${command:cmake.launchTargetPath}.rp6502",
-            "dbg": "${command:cmake.launchTargetPath}.dbg",
             "stopOnEntry": false,
             "stopOnExit": true
         },

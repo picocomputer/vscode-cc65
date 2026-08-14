@@ -2,6 +2,20 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "label": "RP6502: update tools",
+            "type": "process",
+            "command": "cmake",
+            "args": [
+                "-P",
+                "${workspaceFolder}/tools/CMakeLists.txt"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": []
+        },
+        {
             "label": "RP6502: upload ROM",
             "type": "shell",
             "command": "python3",
