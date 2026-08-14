@@ -7,13 +7,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/tools/CMakeLists.txt)
 #set(CC65_TARGET_SYSTEM rp6502)
 #set(LLVM_MOS_PLATFORM rp6502)
 
-if(DEFINED CC65_TARGET_SYSTEM)
-    find_package(cc65 REQUIRED)
-elseif(DEFINED LLVM_MOS_PLATFORM)
-    find_package(llvm-mos-sdk REQUIRED)
-else()
-    rp6502_require_toolchain()
-endif()
+rp6502_require_package()
 
 project(MY-RP6502-PROJECT C ASM) # llvm-mos also does C++; add CXX here
 
