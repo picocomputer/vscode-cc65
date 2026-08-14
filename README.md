@@ -197,7 +197,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/tools/CMakeLists.txt)
 ```
 
 Delete the `add_subdirectory(tools)` line, which the `include()` replaces, and
-`tools/rp6502.cmake`, which is now `tools/cc65.cmake`. Copy
+`tools/rp6502.cmake`, which is now `tools/cc65-toolchain.cmake`. Copy
 `CMakePresets.json` from this template as well — that is where the compiler is
 chosen now. Old projects called `rp6502_executable()` with the address their
 compiler happened to use; `DATA default RESET default` works under both.
