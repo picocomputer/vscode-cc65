@@ -1,4 +1,8 @@
-# RP6502 VS Code Scaffolding for CC65
+# Archived - DO NOT USE
+
+Use the [SDK](https://github.com/picocomputer/rp6502-sdk) instead.
+
+## RP6502 VS Code Scaffolding for CC65
 
 This provides scaffolding for a new Picocomputer 6502 software project. Both
 C and assembly examples of "Hello, world!" are included. Make sure
